@@ -1,11 +1,4 @@
-"""Column-oriented access to the supermarket BTR dataset with derived fields.
-
-Loading is deliberately separate from feature construction: this module reads the
-CSV and derives quantities that are properties of a row alone, never of the
-dataset as a whole. Anything that must be estimated from a sample -- vocabularies,
-category sets, scalers, bucket edges -- belongs in :mod:`src.eda.features`, where
-it is fitted on training indices only.
-"""
+"""Column-oriented access to the supermarket BTR dataset with derived fields."""
 
 from __future__ import annotations
 
@@ -13,6 +6,7 @@ import csv
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -38,15 +32,23 @@ NUMERIC_FIELDS: tuple[str, ...] = (
     "nutrition_score",
 )
 
-NUTRITION_SENTINEL = 0.0
-"""``nutrition_score`` is 0 exactly for Household and Personal Care rows.
+AUDITED_NUMERIC_FIELDS: tuple[str, ...] = (
+    "package_value",
+    "volume_in3",
+    "month_index",
+)
+"""Numeric columns derived only so that discarding them is a measurement."""
 
-The column's genuine range is 18-99, so the sentinel is recorded as missing
-rather than passed through as an extreme low score.
-"""
+NUTRITION_SENTINEL = 0.0
+"""``nutrition_score`` is 0 exactly for Household and Personal Care rows."""
 
 _TRAILING_PARENTHETICAL = re.compile(r"\(([^)]+)\)\s*$")
 _TOKEN = re.compile(r"[a-z0-9]+")
+_LEADING_NUMBER = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)")
+_DIMENSIONS = re.compile(
+    r"([0-9]+(?:\.[0-9]+)?)\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*x\s*([0-9]+(?:\.[0-9]+)?)"
+)
+_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 NO_PHRASE = "<none>"
 """Value used when a title carries no trailing parenthetical."""
@@ -62,7 +64,6 @@ _ORACLE_TIER_B = frozenset(
 @dataclass(frozen=True)
 class BtrData:
     """One row per product impression, with row-local derived fields."""
-
     target: np.ndarray
     query_ids: tuple[str, ...]
     text: tuple[str, ...]
@@ -79,22 +80,11 @@ class BtrData:
     @property
     def positive_rate(self) -> float:
         """Fraction of impressions that were bought."""
-
         return float(self.target.mean())
 
 
 def load_btr_data(path: Path | str = DEFAULT_DATASET_PATH) -> BtrData:
-    """Read the dataset and derive row-local fields.
-
-    ``cart`` is never read. It is a later step of the same funnel as ``bought``
-    (no row has ``bought`` true with ``cart`` false), so using it as a feature
-    would leak the target.
-
-    ``filter_category`` and ``filter_storage_type`` are not read either: they
-    duplicate ``category`` and ``storage_type`` in every row. The price filter
-    bounds are read only to derive ``price_pct``.
-    """
-
+    """Read the dataset and derive row-local fields."""
     source = Path(path)
     with source.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -112,6 +102,9 @@ def load_btr_data(path: Path | str = DEFAULT_DATASET_PATH) -> BtrData:
         "net_weight_oz": _column(rows, "net_weight_oz"),
         "nutrition_score": _column(rows, "nutrition_score"),
         "price_pct": _price_pct(rows),
+        "package_value": _package_value(rows),
+        "volume_in3": _package_volume(rows),
+        "month_index": _month_index(rows),
     }
     nutrition_missing = (numeric["nutrition_score"] == NUTRITION_SENTINEL).astype(
         np.int8
@@ -137,33 +130,18 @@ def load_btr_data(path: Path | str = DEFAULT_DATASET_PATH) -> BtrData:
 
 
 def tokenize(text: str) -> list[str]:
-    """Split text into lowercase alphanumeric tokens.
-
-    This is the tokenization every reported vocabulary count refers to.
-    """
-
+    """Split text into lowercase alphanumeric tokens."""
     return _TOKEN.findall(text.lower())
 
 
 def _popularity_phrase(title: str) -> str:
-    """Return the trailing parenthetical of a title, or :data:`NO_PHRASE`.
-
-    The phrase is observable at impression time, so it is a legitimate feature.
-    """
-
+    """Return the trailing parenthetical of a title, or :data:`NO_PHRASE`."""
     match = _TRAILING_PARENTHETICAL.search(title)
     return match.group(1) if match else NO_PHRASE
 
 
 def _oracle_tier(phrase: str) -> str:
-    """Map a popularity phrase to the hand-assigned tier A, B or C.
-
-    The grouping was chosen after inspecting purchase rates over the *whole*
-    dataset, so any model using it is an oracle and its score is an upper bound,
-    not an achievable baseline. Use :attr:`BtrData.popularity_phrase` for a
-    feature that can be learned honestly from a training fold.
-    """
-
+    """Map a popularity phrase to the hand-assigned tier A, B or C."""
     if phrase in _ORACLE_TIER_A:
         return "A"
     if phrase in _ORACLE_TIER_B:
@@ -178,17 +156,53 @@ def _column(rows: Sequence[dict[str, str]], field: str) -> np.ndarray:
 
 
 def _price_pct(rows: Sequence[dict[str, str]]) -> np.ndarray:
-    """Position of the price inside the shopper's requested price window.
-
-    Every row satisfies its own filter, so this is always in [0, 1]; the width is
-    guarded anyway so a degenerate window yields 0.5 rather than a division error.
-    """
-
+    """Position of the price inside the shopper's requested price window."""
     price = _column(rows, "price")
     low = _column(rows, "filter_price_min")
     high = _column(rows, "filter_price_max")
     width = high - low
     return np.where(width > 0, (price - low) / np.where(width > 0, width, 1.0), 0.5)
+
+
+def _package_value(rows: Sequence[dict[str, str]]) -> np.ndarray:
+    """The number in ``package_size``, with its unit left in ``unit_of_measure``."""
+    return np.fromiter(
+        (_leading_number(row["package_size"]) for row in rows),
+        dtype=np.float64,
+        count=len(rows),
+    )
+
+
+def _package_volume(rows: Sequence[dict[str, str]]) -> np.ndarray:
+    """Cubic inches from ``dimensions_in``, parsed as ``length x width x height``."""
+    values = []
+    for row in rows:
+        match = _DIMENSIONS.search(row["dimensions_in"])
+        if match is None:
+            values.append(float("nan"))
+            continue
+        length, width, height = (float(group) for group in match.groups())
+        values.append(length * width * height)
+    return np.asarray(values, dtype=np.float64)
+
+
+def _month_index(rows: Sequence[dict[str, str]]) -> np.ndarray:
+    """Months elapsed since the earliest event, as a continuous time coordinate."""
+    months = np.fromiter(
+        (
+            datetime.strptime(row["timestamp"], _TIMESTAMP_FORMAT).year * 12
+            + datetime.strptime(row["timestamp"], _TIMESTAMP_FORMAT).month
+            for row in rows
+        ),
+        dtype=np.float64,
+        count=len(rows),
+    )
+    return months - months.min()
+
+
+def _leading_number(value: str) -> float:
+    match = _LEADING_NUMBER.match(value)
+    return float(match.group(1)) if match else float("nan")
 
 
 def _parse_bool(value: str, field: str) -> int:

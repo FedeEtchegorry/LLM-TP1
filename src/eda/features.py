@@ -1,18 +1,4 @@
-"""Feature blocks that are fitted on training rows and applied to any rows.
-
-Every block follows the same two-step contract:
-
-``fit(data, train_indices)``
-    Estimate whatever the block needs from the training rows *only* --
-    vocabulary, category set, mean and scale, bucket edges.
-
-``transform(data, indices)``
-    Produce a dense matrix for the requested rows using the fitted state.
-
-Keeping estimation behind ``fit`` is what makes the reported scores honest: a
-vocabulary built over all 10,000 rows would let validation rows influence the
-feature space even though their labels are never seen.
-"""
+"""Feature blocks that are fitted on training rows and applied to any rows."""
 
 from __future__ import annotations
 
@@ -34,7 +20,6 @@ class NotFittedError(RuntimeError):
 @dataclass
 class BagOfWords:
     """Binary word-occurrence features over ``title + description + ingredients``."""
-
     ngram_range: tuple[int, int] = (1, 1)
     min_df: int = 1
     name: str = "bag_of_words"
@@ -64,7 +49,6 @@ class BagOfWords:
 @dataclass
 class CategoricalOneHot:
     """One-hot columns for categorical fields; unseen values become all-zero."""
-
     fields: tuple[str, ...]
     name: str = "categorical"
     _levels: dict[str, tuple[str, ...]] = field(default_factory=dict, init=False)
@@ -105,7 +89,6 @@ class CategoricalOneHot:
 @dataclass
 class NumericScaled:
     """Numeric columns, median-imputed and standardised on the training rows."""
-
     fields: tuple[str, ...]
     name: str = "numeric"
     _medians: dict[str, float] = field(default_factory=dict, init=False)
@@ -136,13 +119,7 @@ class NumericScaled:
 
 @dataclass
 class NumericBuckets:
-    """Quantile buckets per numeric column, with edges taken from training rows.
-
-    This is the block that matters most: the purchase-rate curve against
-    ``price_pct`` is an inverted U, and a single linear coefficient cannot
-    represent a hump. One-hot buckets can.
-    """
-
+    """Quantile buckets per numeric column, with edges taken from training rows."""
     fields: tuple[str, ...]
     n_bins: int = 10
     name: str = "numeric_buckets"
@@ -179,20 +156,7 @@ class NumericBuckets:
 
 @dataclass
 class Crossed:
-    """The outer product of two blocks: one column per pair of their columns.
-
-    An additive model gives every product the same price response, differing only
-    by a constant offset per popularity level. Crossing the two blocks lets the
-    whole price curve change shape from one level to the next.
-
-    This exists to *measure* interaction, not to ship it. A Transformer models
-    feature interaction natively -- attention across the field tokens, then the
-    feed-forward layers -- so the gap between the additive row and the crossed row
-    in :mod:`src.eda.run_interactions` is the evidence for using one. Explicit
-    crosses do not scale: they multiply the column count and need to be chosen by
-    hand, one pair at a time.
-    """
-
+    """The outer product of two blocks: one column per pair of their columns."""
     left: object
     right: object
     name: str = "crossed"
@@ -212,7 +176,6 @@ class Crossed:
 @dataclass
 class MissingIndicators:
     """Binary flags for sentinel-coded missing values."""
-
     name: str = "missing_indicators"
 
     def fit(self, data: BtrData, train_indices: Indices) -> "MissingIndicators":
@@ -226,17 +189,14 @@ class MissingIndicators:
 @dataclass(frozen=True)
 class FeatureSpec:
     """A named set of blocks, fitted and applied together."""
-
     name: str
     blocks: tuple[object, ...]
     uses_oracle: bool = False
     """True when a block reads a field derived from whole-dataset label rates."""
-
     def fit_transform(
         self, data: BtrData, train_indices: Indices, other_indices: Indices
     ) -> tuple[np.ndarray, np.ndarray]:
         """Fit on ``train_indices`` and transform both index sets."""
-
         for block in self.blocks:
             block.fit(data, train_indices)
         return (

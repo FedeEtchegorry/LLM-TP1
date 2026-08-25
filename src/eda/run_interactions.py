@@ -1,28 +1,4 @@
-"""Does the target contain feature interactions a linear model cannot reach?
-
-Run with ``python -m src.eda.run_interactions``.
-
-This is the empirical argument for putting a Transformer in the solution rather
-than a linear model over the same features. The comparison is held as tight as
-possible: each pair of rows uses the *same* columns, differing only in whether
-their products are also supplied.
-
-*additive*
-    ``popularity`` and ``price_pct`` buckets side by side. One price curve, shared
-    by every popularity level; the level only shifts it up or down.
-
-*interaction*
-    the same blocks plus their outer product. Every popularity level gets its own
-    price curve.
-
-If the interaction rows win, the response surface is not additive, and a model
-that has to be told each interaction by hand is the wrong tool. If they do not,
-the extra columns are only variance and the simpler model stands -- a result
-worth reporting either way.
-
-The same protocol as everywhere else in this package: 5-fold query-grouped CV,
-every column fitted on training rows only, the test set untouched.
-"""
+"""Does the target contain feature interactions a linear model cannot reach?"""
 
 from __future__ import annotations
 
@@ -60,12 +36,7 @@ def _category() -> CategoricalOneHot:
 
 
 def interaction_specs(field: str, *, uses_oracle: bool) -> tuple[FeatureSpec, ...]:
-    """The additive/crossed ladder over ``field``, ``price_pct`` and ``category``.
-
-    ``field`` is either ``popularity_phrase`` -- the raw parenthetical, observable
-    at impression time -- or ``oracle_tier``, the hand-assigned A/B/C grouping.
-    """
-
+    """The additive/crossed ladder over ``field``, ``price_pct`` and ``category``."""
     label = "tier" if uses_oracle else "phrase"
     return (
         FeatureSpec(f"{label} alone", (_popularity(field),), uses_oracle),

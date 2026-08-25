@@ -1,15 +1,4 @@
-"""PCA over the text bag-of-words, ranked by predictive value.
-
-Run with ``python -m src.eda.run_pca``.
-
-The point of the exhibit is that PCA maximises *variance*, not separability. The
-components are fitted on one fold's training rows and each is then scored, on
-that fold's validation rows, by how well it alone ranks ``bought`` -- so the
-ranking is a measurement rather than a description of the data it was fitted on.
-
-The figure is optional: matplotlib is not a project dependency, so the numbers
-print with or without it and ``--figure`` is skipped when it is unavailable.
-"""
+"""PCA over the text bag-of-words, ranked by predictive value."""
 
 from __future__ import annotations
 
@@ -23,14 +12,10 @@ from sklearn.metrics import roc_auc_score
 from src.eda.dataset import DEFAULT_DATASET_PATH, load_btr_data, tokenize
 from src.partitions import build_query_partitions
 
-TIER_COLOURS = {"A": "#2a78d6", "B": "#eb6834", "C": "#1baf7a"}
-
-
 def build_bag_of_words(
     texts: Sequence[str], vocabulary: Sequence[str]
 ) -> np.ndarray:
     """Binary occurrence matrix over a fixed vocabulary."""
-
     position = {word: index for index, word in enumerate(vocabulary)}
     matrix = np.zeros((len(texts), len(position)), dtype=np.float64)
     for row, text in enumerate(texts):
@@ -43,7 +28,6 @@ def build_bag_of_words(
 
 def fit_pca(matrix: np.ndarray, n_components: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return component vectors, explained-variance ratios and the column means."""
-
     means = matrix.mean(axis=0)
     centred = matrix - means
     _, singular, components = np.linalg.svd(centred, full_matrices=False)
@@ -110,43 +94,42 @@ def _write_figure(
     tiers: Sequence[str],
     ratios: np.ndarray,
 ) -> None:
+    """The same points twice, coloured by tier and then by the label."""
     try:
-        import matplotlib
+        import pandas as pd
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        from src.eda.charts import save_figure, scatter_panels
     except ImportError:
         print(f"\nmatplotlib is not installed; skipped {destination}")
         return
 
-    figure, axes = plt.subplots(1, 2, figsize=(12.4, 5.0), facecolor="white")
-    tier_array = np.array(tiers)
-    for tier in ("C", "B", "A"):
-        mask = tier_array == tier
-        axes[0].scatter(
-            projected[mask, 0], projected[mask, 1], s=5, alpha=0.4,
-            c=TIER_COLOURS[tier], label=f"tier {tier}", linewidths=0,
-        )
-    axes[0].set_title("Coloured by the hand-assigned tier", loc="left")
-    axes[0].legend(markerscale=3, fontsize=8)
-    axes[1].scatter(
-        projected[actual == 0, 0], projected[actual == 0, 1], s=5, alpha=0.3,
-        c="#c4cbd3", label="not bought", linewidths=0,
+    frame = pd.DataFrame(
+        {
+            "PC1": projected[:, 0],
+            "PC2": projected[:, 1],
+            "tier": list(tiers),
+            "bought": np.where(actual == 1, "bought", "not bought"),
+        }
     )
-    axes[1].scatter(
-        projected[actual == 1, 0], projected[actual == 1, 1], s=6, alpha=0.6,
-        c="#2a78d6", label="bought", linewidths=0,
+    scatter_panels(
+        frame,
+        x="PC1",
+        y="PC2",
+        groupings=(
+            ("tier", "Coloured by the hand-assigned tier"),
+            ("bought", "Coloured by the label"),
+        ),
+        title="PCA organises the text by product type, not by buyer",
+        subtitle=(
+            f"the first two components explain {100 * ratios[:2].sum():.1f}% of "
+            f"variance between them. The clusters are product categories and each "
+            f"one contains all three tiers, so a rotation that maximises variance "
+            f"is not a rotation that separates the label"
+        ),
+        xlabel=f"PC1 — {100 * ratios[0]:.1f}% of variance",
+        ylabel=f"PC2 — {100 * ratios[1]:.1f}%",
     )
-    axes[1].set_title("Coloured by the label", loc="left")
-    axes[1].legend(markerscale=3, fontsize=8)
-    for axis in axes:
-        axis.set_xlabel(f"PC1 — {100 * ratios[0]:.1f}% of variance")
-        axis.set_ylabel(f"PC2 — {100 * ratios[1]:.1f}%")
-        axis.grid(alpha=0.15)
-        axis.set_facecolor("white")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    figure.tight_layout()
-    figure.savefig(destination, dpi=105, facecolor="white")
+    save_figure(destination)
     print(f"\nwrote {destination}")
 
 

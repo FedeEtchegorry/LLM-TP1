@@ -1,17 +1,4 @@
-"""Baseline and headroom tables for the BTR task.
-
-Run with ``python -m src.eda.run_baselines``.
-
-Two tables are produced, and the separation between them is the point:
-
-*Baselines* use only fields observable at impression time, with every vocabulary,
-category set, scaler and bucket edge fitted on the training rows of each fold.
-These are achievable numbers.
-
-*Oracle* rows use the hand-assigned A/B/C tier, whose grouping was chosen after
-looking at purchase rates over the whole dataset. They are upper bounds that show
-where the headroom is; they are not results a model can claim.
-"""
+"""Baseline and headroom tables for the BTR task."""
 
 from __future__ import annotations
 
@@ -46,7 +33,6 @@ ALL_NUMERIC = ("price", "price_pct", "net_weight_oz", "nutrition_score")
 
 def baseline_specs() -> tuple[FeatureSpec, ...]:
     """Feature sets that use nothing beyond what a search page knows."""
-
     return (
         FeatureSpec("numerics only, linear", (NumericScaled(ALL_NUMERIC),)),
         FeatureSpec(
@@ -84,7 +70,6 @@ def baseline_specs() -> tuple[FeatureSpec, ...]:
 
 def oracle_specs() -> tuple[FeatureSpec, ...]:
     """Feature sets containing the hand-assigned tier -- upper bounds only."""
-
     return (
         FeatureSpec(
             "oracle tier only",
@@ -128,7 +113,6 @@ def evaluate_specs(
     data: BtrData, partitions: DataPartitions, specs: Iterable[FeatureSpec]
 ) -> list[EvaluationResult]:
     """Score every spec across the cross-validation folds."""
-
     return [
         evaluate_across_folds(
             spec.name,
@@ -143,7 +127,6 @@ def evaluate_specs(
 
 def markdown_table(results: Iterable[EvaluationResult], positive_rate: float) -> str:
     """Render results as a Markdown table, mean +/- std across folds."""
-
     lines = [
         "| Model | ROC-AUC | PR-AUC (AP) |",
         "|---|---:|---:|",

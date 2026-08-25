@@ -25,6 +25,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.idea
+.claude
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
@@ -216,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Tests -- run locally, not part of the delivered repo
+tests/
+
+# Generated figures -- regenerate with the run_* scripts
+*.png

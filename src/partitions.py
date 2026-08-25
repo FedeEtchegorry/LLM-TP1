@@ -13,7 +13,6 @@ from sklearn.model_selection import StratifiedGroupKFold
 @dataclass(frozen=True)
 class FoldIndices:
     """Disjoint training and validation indices for one model-selection run."""
-
     fold_index: int
     train_indices: tuple[int, ...]
     validation_indices: tuple[int, ...]
@@ -22,14 +21,12 @@ class FoldIndices:
 @dataclass(frozen=True)
 class DataPartitions:
     """A fixed test holdout plus cross-validation folds over development data."""
-
     test_indices: tuple[int, ...]
     folds: tuple[FoldIndices, ...]
 
     @property
     def development_indices(self) -> tuple[int, ...]:
         """Return every non-test row index in deterministic order."""
-
         first_fold = self.folds[0]
         return tuple(sorted(first_fold.train_indices + first_fold.validation_indices))
 
@@ -42,12 +39,7 @@ def build_query_partitions(
     test_fraction: float = 0.2,
     random_state: int = 42,
 ) -> DataPartitions:
-    """Split row indices while keeping each query entirely in one subset.
-
-    The fixed test set is one fold of an outer grouped split. A separate inner
-    grouped split creates train/validation folds from the development rows.
-    """
-
+    """Split row indices while keeping each query entirely in one subset."""
     if len(targets) != len(query_ids):
         raise ValueError("targets and query_ids must have the same length")
     if len(targets) == 0:
@@ -130,7 +122,6 @@ def build_query_partitions(
 
 def _split_count_for_fraction(test_fraction: float) -> int:
     """Return the grouped-CV split count represented by a test fraction."""
-
     if isinstance(test_fraction, bool) or not 0.0 < test_fraction <= 0.5:
         raise ValueError("test_fraction must be greater than 0 and at most 0.5")
     inverse = 1.0 / test_fraction
@@ -146,7 +137,6 @@ def _validate_and_normalize_targets(
     targets: Sequence[bool | int],
 ) -> np.ndarray:
     """Validate binary targets and convert them to scikit-learn's integer form."""
-
     accepted_types = (bool, int, np.bool_, np.integer)
     if any(not isinstance(target, accepted_types) for target in targets):
         raise ValueError("targets must contain 0 and 1 only")
@@ -161,7 +151,6 @@ def _validate_and_normalize_targets(
 
 def _normalize_query_ids(query_ids: Sequence[Hashable]) -> np.ndarray:
     """Map arbitrary hashable query identifiers to stable integer group labels."""
-
     group_codes: dict[Hashable, int] = {}
     normalized: list[int] = []
     try:
@@ -181,7 +170,6 @@ def _require_class_group_support(
     context: str,
 ) -> None:
     """Ensure each class spans enough query groups for grouped stratification."""
-
     for target in (0, 1):
         supporting_groups = np.unique(query_ids[targets == target])
         if len(supporting_groups) < required_groups:

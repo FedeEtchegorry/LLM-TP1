@@ -1,10 +1,4 @@
-"""Structural and data-quality facts about the dataset.
-
-Run with ``python -m src.eda.run_structure``.
-
-Everything printed here is a direct count over the CSV -- no model, no split.
-These are the claims the EDA write-up cites, emitted so they can be re-checked.
-"""
+"""Structural and data-quality facts about the dataset."""
 
 from __future__ import annotations
 
@@ -15,7 +9,6 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 
 from src.eda.curves import additivity_series, price_pct_curve
 from src.eda.dataset import (
@@ -63,7 +56,6 @@ def phrase_table(data: BtrData) -> str:
 
 def query_additivity_table(data: BtrData) -> str:
     """Purchases per query against the number of tier-A products it contains."""
-
     series = additivity_series(data)
     lines = [
         "| Tier-A products in query | Queries | Total purchases | Mean |",
@@ -79,7 +71,6 @@ def query_additivity_table(data: BtrData) -> str:
 
 def competition_table(data: BtrData) -> str:
     """Tier-A buy rate against the number of tier-A rivals in the same query."""
-
     by_query: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0])
     for query, tier in zip(data.query_ids, data.oracle_tier, strict=True):
         by_query[query][0] += int(tier == "A")
@@ -103,7 +94,6 @@ def competition_table(data: BtrData) -> str:
 
 def price_pct_deciles(data: BtrData, tier: str = "A", n_bins: int = 10) -> str:
     """The inverted U as a table; :mod:`src.eda.figures` draws the same numbers."""
-
     curve = price_pct_curve(data, tier=tier, n_bins=n_bins)
     lines = ["| Decile | Range | Bought / rows | Rate |", "|---:|---|---:|---:|"]
     for index, (rate, rows) in enumerate(zip(curve.rates, curve.counts, strict=True)):
@@ -129,11 +119,7 @@ def quarterly_table(data: BtrData) -> str:
 
 
 def timestamp_dispersion(data: BtrData) -> tuple[float, float]:
-    """Median within-query span and median within-query pairwise difference.
-
-    The two differ substantially, so the write-up must say which it quotes.
-    """
-
+    """Median within-query span and median within-query pairwise difference."""
     by_query: dict[str, list[datetime]] = collections.defaultdict(list)
     for query, stamp in zip(data.query_ids, data.timestamps, strict=True):
         by_query[query].append(datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ"))
@@ -151,7 +137,6 @@ def timestamp_dispersion(data: BtrData) -> tuple[float, float]:
 
 def vocabulary_size(data: BtrData) -> int:
     """Distinct tokens over ``title + description + ingredients``."""
-
     words: set[str] = set()
     for text in data.text:
         words.update(tokenize(text))
@@ -160,7 +145,6 @@ def vocabulary_size(data: BtrData) -> int:
 
 def universal_words(data: BtrData) -> list[str]:
     """Tokens present in every row -- template scaffolding with zero variance."""
-
     counts: collections.Counter[str] = collections.Counter()
     for text in data.text:
         counts.update(set(tokenize(text)))
@@ -168,12 +152,7 @@ def universal_words(data: BtrData) -> list[str]:
 
 
 def leakage_crosstab(path: Path) -> str:
-    """Cross-tabulate ``cart`` against ``bought`` straight from the CSV.
-
-    ``cart`` is excluded from :class:`~src.eda.dataset.BtrData` on purpose, so
-    this reads the file directly to show why.
-    """
-
+    """Cross-tabulate ``cart`` against ``bought`` straight from the CSV."""
     import csv
 
     counts: collections.Counter[tuple[str, str]] = collections.Counter()

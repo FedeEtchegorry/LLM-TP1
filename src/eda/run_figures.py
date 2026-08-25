@@ -1,9 +1,4 @@
-"""Regenerate the SVG figures used by ``docs/EDA.md``.
-
-Run with ``python -m src.eda.run_figures``. The numbers are recomputed from the
-dataset on every run, so the figures cannot fall out of step with the tables in
-``python -m src.eda.run_structure``.
-"""
+"""Regenerate the two headline figures used by ``docs/EDA.md``."""
 
 from __future__ import annotations
 
@@ -12,7 +7,7 @@ from pathlib import Path
 
 from src.eda.curves import additivity_series, price_pct_curve
 from src.eda.dataset import DEFAULT_DATASET_PATH, load_btr_data
-from src.eda.figures import render_additivity, render_price_curve, write_figure
+from src.eda.figures import draw_additivity, draw_price_curve, save_figure
 
 DEFAULT_FIGURE_DIRECTORY = Path("docs/figures")
 
@@ -31,8 +26,10 @@ def main(argv: list[str] | None = None) -> int:
     series = additivity_series(data)
 
     written = [
-        write_figure(args.out / "price-inverted-u.svg", render_price_curve(curve)),
-        write_figure(args.out / "purchases-additive.svg", render_additivity(series)),
+        save_figure(
+            args.out / "price-inverted-u.png", draw_price_curve(curve, tier=args.tier)
+        ),
+        save_figure(args.out / "purchases-additive.png", draw_additivity(series)),
     ]
     for path in written:
         print(f"wrote {path}")

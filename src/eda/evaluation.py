@@ -1,27 +1,4 @@
-"""Fold-level evaluation shared by every model in the project.
-
-The harness is deliberately model-agnostic. A candidate supplies one callable::
-
-    score_fold(train_indices, validation_indices) -> np.ndarray
-
-which fits on the training rows and returns a score per validation row, higher
-meaning more likely to be bought. A logistic-regression baseline and a
-Transformer therefore report through the same protocol, on the same folds, with
-the same metrics -- which is what makes an ablation table comparable.
-
-Metric definitions, stated once so the numbers are unambiguous:
-
-``roc_auc``
-    :func:`sklearn.metrics.roc_auc_score`.
-
-``average_precision``
-    :func:`sklearn.metrics.average_precision_score` -- the step-wise sum
-    ``sum_n (R_n - R_{n-1}) * P_n``. Reported as "PR-AUC" in prose; it is average
-    precision, not a trapezoidal area under an interpolated curve.
-
-The fixed test set is never touched by :func:`evaluate_across_folds`. Score it
-once, with :func:`evaluate_on_test`, after a configuration has been chosen.
-"""
+"""Fold-level evaluation shared by every model in the project."""
 
 from __future__ import annotations
 
@@ -43,7 +20,6 @@ ScoreFold = Callable[[Sequence[int], Sequence[int]], np.ndarray]
 @dataclass(frozen=True)
 class FoldScore:
     """Validation metrics for a single cross-validation fold."""
-
     fold_index: int
     roc_auc: float
     average_precision: float
@@ -54,7 +30,6 @@ class FoldScore:
 @dataclass(frozen=True)
 class EvaluationResult:
     """Metrics for one candidate across every fold."""
-
     name: str
     folds: tuple[FoldScore, ...]
     uses_oracle: bool = False
@@ -94,7 +69,6 @@ def evaluate_across_folds(
     uses_oracle: bool = False,
 ) -> EvaluationResult:
     """Run ``score_fold`` on every fold and collect validation metrics."""
-
     scores = []
     for fold in partitions.folds:
         predicted = np.asarray(
@@ -125,7 +99,6 @@ def evaluate_on_test(
     score_fold: ScoreFold,
 ) -> FoldScore:
     """Score the fixed test set once, training on all development rows."""
-
     development = partitions.development_indices
     predicted = np.asarray(
         score_fold(development, partitions.test_indices), dtype=np.float64
@@ -144,7 +117,6 @@ def logistic_scorer(
     data: BtrData, spec: FeatureSpec, *, c: float = 1.0, max_iter: int = 2000
 ) -> ScoreFold:
     """Return a :data:`ScoreFold` fitting L2 logistic regression on ``spec``."""
-
     def score_fold(
         train_indices: Sequence[int], other_indices: Sequence[int]
     ) -> np.ndarray:
