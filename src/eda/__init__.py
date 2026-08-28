@@ -1,1 +1,1 @@
-"""Exploratory data analysis and non-neural baselines for the BTR task."""
+"""Exploratory data analysis for the BTR task."""
