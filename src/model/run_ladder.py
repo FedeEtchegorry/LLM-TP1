@@ -13,11 +13,12 @@ as a point in the ablation table:
 from __future__ import annotations
 
 import argparse
+import time
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import PARAMETERS_PATH, PROTOCOL, ladder_runs, load_parameters
-from src.model.experiment import describe, partition, run_one
+from src.model.experiment import describe, partition, run_one, sweep_note
 from src.model.protocol import EvaluationResult, markdown_table
 from src.model.results import RESULTS_DIR
 
@@ -45,12 +46,21 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n=== LADDER ({len(runs)} rungs from {args.parameters}) ===")
     results: list[EvaluationResult] = []
-    for name, config in runs.items():
+    trained_seconds, trained = 0.0, 0
+    for position, (name, config) in enumerate(runs.items(), start=1):
+        started = time.perf_counter()
+        print(f"  [{position}/{len(runs)}] {name}", flush=True)
         result, note = run_one(
             config, frame, partitions, directory=args.results, force=args.force
         )
+        if note != "recorded":
+            trained_seconds += time.perf_counter() - started
+            trained += 1
         results.append(result)
-        print(f"  {config.digest}  {result.summary_row()}   [{note}]")
+        print(
+            f"  {config.digest}  {result.summary_row()}   [{note}]"
+            + sweep_note(trained_seconds, trained, len(runs) - position)
+        )
 
     if results:
         print()

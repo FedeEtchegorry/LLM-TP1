@@ -74,28 +74,32 @@ def train_fold(
     train_indices,
     *,
     seed: int,
+    device=None,
 ) -> TrainedFold:
     """Fit one model, stopping on held-out training queries rather than on the fold."""
+    from src.model.hardware import device as best_device
+
     torch.manual_seed(seed)
+    device = device or best_device()
     target = target_of(frame)
     fit_indices, stop_indices = early_stopping_split(
         target, frame["query_id"].tolist(), train_indices
     )
 
     encoder = RowEncoder(spec_for(config)).fit(frame, train_indices)
-    fit_rows = encoder.transform(frame, fit_indices)
-    stop_rows = encoder.transform(frame, stop_indices)
-    fit_target = torch.tensor(target[fit_indices], dtype=torch.float32)
-    stop_target = torch.tensor(target[stop_indices], dtype=torch.float32)
+    fit_rows = encoder.transform(frame, fit_indices).to(device)
+    stop_rows = encoder.transform(frame, stop_indices).to(device)
+    fit_target = torch.tensor(target[fit_indices], dtype=torch.float32, device=device)
+    stop_target = torch.tensor(target[stop_indices], dtype=torch.float32, device=device)
 
-    model = BtrTransformer(encoder, config, TRAINING.n_buckets)
+    model = BtrTransformer(encoder, config, TRAINING.n_buckets).to(device)
     optimiser = torch.optim.AdamW(
         model.parameters(),
         lr=TRAINING.learning_rate,
         weight_decay=TRAINING.weight_decay,
     )
     loss_of = nn.BCEWithLogitsLoss()
-    generator = torch.Generator().manual_seed(seed)
+    generator = torch.Generator(device="cpu").manual_seed(seed)
 
     curve: list[EpochRecord] = []
     best_loss, best_epoch = float("inf"), 0
@@ -103,7 +107,7 @@ def train_fold(
 
     for epoch in range(1, TRAINING.epochs + 1):
         model.train()
-        order = torch.randperm(len(fit_rows), generator=generator)
+        order = torch.randperm(len(fit_rows), generator=generator).to(device)
         for start in range(0, len(order), TRAINING.batch_size):
             rows = order[start : start + TRAINING.batch_size]
             optimiser.zero_grad(set_to_none=True)
@@ -137,13 +141,23 @@ def train_fold(
 def predict(model: BtrTransformer, rows: EncodedRows) -> np.ndarray:
     """Probabilities for every row, in batches so a big fold still fits in memory."""
     model.eval()
+    device = next(model.parameters()).device
+    rows = rows.to(device)
     scores = [
         torch.sigmoid(
-            model(rows.select(torch.arange(start, min(start + TRAINING.batch_size, len(rows)))))
+            model(
+                rows.select(
+                    torch.arange(
+                        start,
+                        min(start + TRAINING.batch_size, len(rows)),
+                        device=device,
+                    )
+                )
+            )
         )
         for start in range(0, len(rows), TRAINING.batch_size)
     ]
-    return torch.cat(scores).numpy()
+    return torch.cat(scores).cpu().numpy()
 
 
 @torch.no_grad()
@@ -155,17 +169,29 @@ def _measure(
 ) -> tuple[float, float]:
     """Loss and average precision on one split, without touching the gradients."""
     model.eval()
+    device = next(model.parameters()).device
+    rows = rows.to(device)
     logits = torch.cat(
         [
-            model(rows.select(torch.arange(start, min(start + TRAINING.batch_size, len(rows)))))
+            model(
+                rows.select(
+                    torch.arange(
+                        start,
+                        min(start + TRAINING.batch_size, len(rows)),
+                        device=device,
+                    )
+                )
+            )
             for start in range(0, len(rows), TRAINING.batch_size)
         ]
     )
     loss = float(loss_of(logits, target))
-    labels = target.numpy()
+    labels = target.cpu().numpy()
     if labels.min() == labels.max():
         return loss, float("nan")
-    return loss, float(average_precision_score(labels, torch.sigmoid(logits).numpy()))
+    return loss, float(
+        average_precision_score(labels, torch.sigmoid(logits).cpu().numpy())
+    )
 
 
 def transformer_scorer(

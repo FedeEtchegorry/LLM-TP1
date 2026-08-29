@@ -75,6 +75,17 @@ class EncodedRows:
     def __len__(self) -> int:
         return int(self.token_ids.shape[0])
 
+    def to(self, device) -> "EncodedRows":
+        """The same rows on another device. Cheap and idempotent when already there."""
+        return EncodedRows(
+            token_ids=self.token_ids.to(device),
+            field_ids=self.field_ids.to(device),
+            padding_mask=self.padding_mask.to(device),
+            numeric_values=self.numeric_values.to(device),
+            numeric_buckets=self.numeric_buckets.to(device),
+            numeric_missing=self.numeric_missing.to(device),
+        )
+
     def select(self, rows: torch.Tensor) -> "EncodedRows":
         """The same columns for a subset of rows, in the order given: one batch."""
         return EncodedRows(

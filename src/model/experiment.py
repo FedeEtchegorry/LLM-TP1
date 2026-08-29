@@ -128,16 +128,24 @@ def run_one(
             return recorded, "recorded"
 
     trained: list[TrainedFold] = []
+    folds = folds_for(config, partitions)
     started = time.perf_counter()
     result = evaluate_across_folds(
         config.name,
         target_of(frame),
-        folds_for(config, partitions),
-        scorer_for(config, frame, trained),
+        folds,
+        _reporting(scorer_for(config, frame, trained), len(folds.folds), started),
     )
     seconds = time.perf_counter() - started
 
-    save(config, result, seconds=seconds, curves=_curves(trained), directory=directory)
+    save(
+        config,
+        result,
+        seconds=seconds,
+        curves=_curves(trained),
+        device=_device_label(),
+        directory=directory,
+    )
     # Only our own model's weights are kept. The linear regimes have nothing worth
     # storing, and the fine-tuned checkpoint is 22M parameters that the same recipe
     # reproduces -- ``run_final`` reads attention out of the Transformer alone.
@@ -197,7 +205,14 @@ def run_test(
     seconds = time.perf_counter() - started
 
     predicted = captured["predicted"]
-    save(config, result, seconds=seconds, curves=_curves(trained), directory=directory)
+    save(
+        config,
+        result,
+        seconds=seconds,
+        curves=_curves(trained),
+        device=_device_label(),
+        directory=directory,
+    )
     save_predictions(config, predicted, directory=directory)
     if PROTOCOL.save_weights and config.model == TRANSFORMER and trained:
         save_weights(config, -1, trained[0].model.state_dict(), directory=directory)
@@ -206,6 +221,50 @@ def run_test(
     if trained:
         note += f", {trained[0].parameters:,} params"
     return result, predicted, note
+
+
+def sweep_note(trained_seconds: float, trained: int, left: int) -> str:
+    """How much of a sweep is left. Cached runs return instantly, so only what really
+    trained feeds the estimate."""
+    if not left:
+        return ""
+    if not trained:
+        return f"   [{left} left]"
+    return f"   [{left} left, ~{_clock(trained_seconds / trained * left)}]"
+
+
+def _reporting(scorer: ScoreFold, total: int, started: float) -> ScoreFold:
+    """Announce each fold as it lands, so a long run is not silence."""
+    done = 0
+
+    def score_fold(train_indices, scored_indices):
+        nonlocal done
+        at = time.perf_counter()
+        scores = scorer(train_indices, scored_indices)
+        done += 1
+        each = (time.perf_counter() - started) / done
+        remaining = each * (total - done)
+        tail = f", ~{_clock(remaining)} left" if done < total else ""
+        print(
+            f"    fold {done}/{total}  {_clock(time.perf_counter() - at)}{tail}",
+            flush=True,
+        )
+        return scores
+
+    return score_fold
+
+
+def _clock(seconds: float) -> str:
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes}m{seconds:02d}s" if minutes else f"{seconds}s"
+
+
+def _device_label() -> str:
+    """What produced these numbers. Stored, but kept out of the digest: moving
+    machines should not force a retrain."""
+    from src.model.hardware import describe, device
+
+    return describe(device())
 
 
 def _curves(trained: list[TrainedFold]) -> list[dict]:

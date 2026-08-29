@@ -1,9 +1,8 @@
-"""Where the pretrained models run, and how the write-up is allowed to say it.
+"""Pick the best device available and name it for the record.
 
-Our own Transformer is small enough that the CPU is not the constraint, and it stays
-there so its numbers do not depend on which machine produced them. The two pretrained
-regimes are a different size -- 22M parameters -- so they take the accelerator when
-there is one, and the run records which one it used.
+Every model runs on the accelerator when there is one. Records store which device
+produced them, because floating-point reductions associate differently and a results
+directory should not mix them silently.
 """
 
 from __future__ import annotations
@@ -12,10 +11,7 @@ import platform
 
 
 def device(preferred: str | None = None):
-    """The best device available, or the one asked for.
-
-    Imported lazily so the modules that never touch torch keep loading without it.
-    """
+    """The best device available, or the one asked for."""
     import torch
 
     if preferred:
@@ -26,7 +22,7 @@ def device(preferred: str | None = None):
 
 
 def describe(target) -> str:
-    """A one-line label for the results record and for the printed table."""
+    """A one-line label for the results record."""
     import torch
 
     if target.type == "cuda":

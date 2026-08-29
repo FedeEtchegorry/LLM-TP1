@@ -49,15 +49,17 @@ class ParameterError(ValueError):
 
 @dataclass(frozen=True)
 class Training:
-    """The same for every run, so no run can win by training longer than another."""
+    """The same for every run, so no run can win by training longer than another.
+
+    """
 
     n_buckets: int = 10
     max_text_tokens: int = 64
-    epochs: int = 30
+    epochs: int = 60
     batch_size: int = 64
-    learning_rate: float = 1e-3
+    learning_rate: float = 1e-4
     weight_decay: float = 0.01
-    patience: int = 5
+    patience: int = 10
     seed: int = 1337
     regularisation: float = 1.0
 

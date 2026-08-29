@@ -10,6 +10,7 @@ attributable to that one thing. The table reports the change, not just the level
 from __future__ import annotations
 
 import argparse
+import time
 
 from src.eda.loading import load_dataset
 from src.model.configs import (
@@ -19,7 +20,7 @@ from src.model.configs import (
     ladder_runs,
     load_parameters,
 )
-from src.model.experiment import describe, partition, run_one
+from src.model.experiment import describe, partition, run_one, sweep_note
 from src.model.protocol import EvaluationResult
 from src.model.results import RESULTS_DIR
 
@@ -84,13 +85,22 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\n=== MODULE ALTERNATIVES ({len(points)}) ===")
     results: list[EvaluationResult] = []
-    for name, config in points.items():
+    trained_seconds, trained = 0.0, 0
+    for position, (name, config) in enumerate(points.items(), start=1):
+        started = time.perf_counter()
+        print(f"  [{position}/{len(points)}] {name}", flush=True)
         result, note = run_one(
             config, frame, partitions, directory=args.results, force=args.force
         )
+        if note != "recorded":
+            trained_seconds += time.perf_counter() - started
+            trained += 1
         results.append(result)
         delta = result.average_precision_mean - base.average_precision_mean
-        print(f"  {config.digest}  {result.summary_row()}   {delta:+.4f}   [{note}]")
+        print(
+            f"  {config.digest}  {result.summary_row()}   {delta:+.4f}   [{note}]"
+            + sweep_note(trained_seconds, trained, len(points) - position)
+        )
 
     print()
     print(comparison_table(base, results))

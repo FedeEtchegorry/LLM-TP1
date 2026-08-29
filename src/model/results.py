@@ -40,6 +40,7 @@ def save(
     *,
     seconds: float,
     curves: list[dict] | None = None,
+    device: str | None = None,
     directory: Path | str = RESULTS_DIR,
 ) -> Path:
     """Write the run's record, creating ``results/`` if this is the first one.
@@ -57,6 +58,7 @@ def save(
         "seconds": round(seconds, 3),
         "config": asdict(config),
         "training": asdict(TRAINING),
+        "device": device or "unrecorded",
         "protocol": asdict(PROTOCOL),
         "metrics": {
             "roc_auc_mean": result.roc_auc_mean,
