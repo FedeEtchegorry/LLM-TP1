@@ -87,6 +87,21 @@ def load(
     )
 
 
+def document(
+    config: RunConfig, directory: Path | str = RESULTS_DIR
+) -> dict | None:
+    """The whole stored record for one run: metrics, curves, parameter counts.
+
+    ``load`` returns only what the protocol needs; the transfer and final tables also
+    quote how many parameters were trained and how long it took, which live here.
+    """
+    path = result_path(config, directory)
+    if not path.exists():
+        return None
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    return stored if stored.get("schema") == SCHEMA else None
+
+
 def weights_path(
     config: RunConfig, fold_index: int, directory: Path | str = RESULTS_DIR
 ) -> Path:
@@ -121,6 +136,36 @@ def load_weights(
     if not path.exists():
         return None
     return torch.load(path, map_location="cpu", weights_only=True)["state"]
+
+
+def predictions_path(
+    config: RunConfig, directory: Path | str = RESULTS_DIR
+) -> Path:
+    """``results/final/<digest>.predictions.npy``.
+
+    The held-out run happens once, so its scores are kept: calibration, lift and the
+    error tables are all views of the same vector, and none of them should cost a
+    retrain -- or, worse, tempt one.
+    """
+    return Path(directory) / f"{config.digest}.predictions.npy"
+
+
+def save_predictions(
+    config: RunConfig, predicted, *, directory: Path | str = RESULTS_DIR
+) -> Path:
+    import numpy as np
+
+    path = predictions_path(config, directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, np.asarray(predicted, dtype=np.float64))
+    return path
+
+
+def load_predictions(config: RunConfig, directory: Path | str = RESULTS_DIR):
+    import numpy as np
+
+    path = predictions_path(config, directory)
+    return np.load(path) if path.exists() else None
 
 
 def documents(directory: Path | str = RESULTS_DIR) -> list[dict]:

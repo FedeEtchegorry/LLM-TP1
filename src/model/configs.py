@@ -21,6 +21,13 @@ PARAMETERS_PATH = Path("parameters.txt")
 
 LOGISTIC = "logistic"
 TRANSFORMER = "transformer"
+FROZEN = "frozen"
+FINETUNE = "finetune"
+MODELS = (LOGISTIC, TRANSFORMER, FROZEN, FINETUNE)
+"""The four regimes the write-up compares, all reporting into the same protocol."""
+
+PRETRAINED = (FROZEN, FINETUNE)
+"""The two that start from somebody else's weights instead of from noise."""
 
 NUMERIC_EMBEDDINGS = ("none", "affine", "buckets", "affine+buckets")
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
@@ -31,6 +38,9 @@ LADDER_NAME = re.compile(r"^L\d")
 
 AXIS_NAME = re.compile(r"^[A-H] ")
 """``[B 1 layer]``, ``[C 8 heads]``, ...: the alternatives ``run_modules`` sweeps."""
+
+TRANSFER_NAME = re.compile(r"^T ")
+"""``[T frozen text]``, ``[T finetuned]``, ...: what ``run_transfer`` walks."""
 
 
 class ParameterError(ValueError):
@@ -53,6 +63,27 @@ class Training:
 
 
 @dataclass(frozen=True)
+class Transfer:
+    """The pretrained side: one checkpoint, and the budget the fine-tune is given.
+
+    ``all-MiniLM-L6-v2`` is the smallest sentence encoder that is still a real one:
+    6 layers, 22M parameters, 384 dimensions. Frozen, it costs one pass over the ten
+    thousand rows; fine-tuned, it costs a training run per epoch, which is why
+    ``finetune_folds`` is 1. Reporting one fold and saying so is honest; reporting
+    one fold as if it were five is not.
+    """
+
+    checkpoint: str = "sentence-transformers/all-MiniLM-L6-v2"
+    max_length: int = 96
+    epochs: int = 3
+    batch_size: int = 32
+    learning_rate: float = 2e-5
+    weight_decay: float = 0.01
+    finetune_folds: int = 1
+    seed: int = 1337
+
+
+@dataclass(frozen=True)
 class Protocol:
     """The split every run reports into, fixed so the table stays comparable.
 
@@ -68,6 +99,7 @@ class Protocol:
 
 
 TRAINING = Training()
+TRANSFER = Transfer()
 PROTOCOL = Protocol()
 
 
@@ -92,20 +124,25 @@ class RunConfig:
 
     @property
     def digest(self) -> str:
-        """Stable across processes, and sensitive to the constants above."""
-        payload = repr(
+        """Stable across processes, and sensitive to the constants above.
+
+        ``TRANSFER`` enters only for the two pretrained regimes: changing the
+        fine-tuning budget should not invalidate a Transformer trained from scratch,
+        which never read it.
+        """
+        payload = [
+            sorted(asdict(self).items()),
+            sorted(asdict(TRAINING).items()),
             (
-                sorted(asdict(self).items()),
-                sorted(asdict(TRAINING).items()),
-                (
-                    PROTOCOL.dataset,
-                    PROTOCOL.folds,
-                    PROTOCOL.test_fraction,
-                    PROTOCOL.random_state,
-                ),
-            )
-        ).encode()
-        return hashlib.sha256(payload).hexdigest()[:12]
+                PROTOCOL.dataset,
+                PROTOCOL.folds,
+                PROTOCOL.test_fraction,
+                PROTOCOL.random_state,
+            ),
+        ]
+        if self.model in PRETRAINED:
+            payload.append(sorted(asdict(TRANSFER).items()))
+        return hashlib.sha256(repr(tuple(payload)).encode()).hexdigest()[:12]
 
 
 def load_parameters(path: Path | str = PARAMETERS_PATH) -> dict[str, RunConfig]:
@@ -131,6 +168,10 @@ def ladder_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
 
 def axis_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
     return {name: run for name, run in runs.items() if AXIS_NAME.match(name)}
+
+
+def transfer_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
+    return {name: run for name, run in runs.items() if TRANSFER_NAME.match(name)}
 
 
 def _run(name: str, section) -> RunConfig:
@@ -167,11 +208,16 @@ def _run(name: str, section) -> RunConfig:
 def _validate(config: RunConfig) -> None:
     """Catch a typo in the file rather than three hours into a sweep."""
     name = config.name
-    if config.model not in (LOGISTIC, TRANSFORMER):
-        raise ParameterError(f"[{name}] model must be {LOGISTIC} or {TRANSFORMER}")
+    if config.model not in MODELS:
+        raise ParameterError(f"[{name}] model must be one of {MODELS}")
     if not (config.text_fields or config.categorical_fields or config.numeric_fields):
         raise ParameterError(f"[{name}] declares no input fields")
-    if config.model == LOGISTIC:
+    if config.model in PRETRAINED and not config.text_fields:
+        raise ParameterError(
+            f"[{name}] {config.model} declares no text_fields, and a pretrained "
+            "language model has nothing to transfer without text"
+        )
+    if config.model != TRANSFORMER:
         return
     for value, allowed, label in (
         (config.numeric_embedding, NUMERIC_EMBEDDINGS, "numeric_embedding"),

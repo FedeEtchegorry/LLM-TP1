@@ -21,7 +21,6 @@ the curve, just not in the decision.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -35,31 +34,10 @@ from src.model.configs import TRAINING, RunConfig
 from src.model.encoding import EncodedRows, EncodingSpec, RowEncoder
 from src.model.network import BtrTransformer, count_parameters
 from src.model.protocol import ScoreFold
+from src.model.records import EpochRecord, TrainedFold
 
 EARLY_STOPPING_SPLITS = 6
 """One sixth of the training queries carry the patience signal; the rest train."""
-
-
-@dataclass(frozen=True)
-class EpochRecord:
-    """One row of the over- and underfitting curve."""
-
-    epoch: int
-    train_loss: float
-    train_ap: float
-    validation_loss: float
-    validation_ap: float
-
-
-@dataclass(frozen=True)
-class TrainedFold:
-    """What a fold produced, ready to be scored, recorded and saved."""
-
-    model: BtrTransformer
-    encoder: RowEncoder
-    curve: list[EpochRecord]
-    best_epoch: int
-    parameters: int
 
 
 def spec_for(config: RunConfig) -> EncodingSpec:

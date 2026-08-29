@@ -143,6 +143,19 @@ class RowEncoder:
     def n_numeric(self) -> int:
         return len(self.spec.numeric_fields)
 
+    @property
+    def text_width(self) -> int:
+        """How many positions the text fields occupy, after ``[CLS]``."""
+        return self._text_width
+
+    def bucket_edges(self, name: str) -> np.ndarray:
+        """The training quantile cuts for one numeric column, for interpretability."""
+        return self._edges[name]
+
+    def standardise(self, name: str, values: np.ndarray) -> np.ndarray:
+        """Put raw values on the scale the network was trained to read them on."""
+        return (values - self._centres[name]) / self._scales[name]
+
     def _fit_words(self, training: pd.DataFrame) -> None:
         seen: set[str] = set()
         longest = 0
@@ -160,7 +173,7 @@ class RowEncoder:
         self._level_unknown = {}
         offset = N_SPECIAL + len(self._words)
         for name in self.spec.categorical_fields:
-            levels = sorted(_categorical(training, name).unique())
+            levels = sorted(categorical_column(training, name).unique())
             self._levels[name] = {
                 level: offset + position for position, level in enumerate(levels)
             }
@@ -170,7 +183,7 @@ class RowEncoder:
     def _fit_numbers(self, training: pd.DataFrame) -> None:
         self._centres, self._scales, self._edges = {}, {}, {}
         for name in self.spec.numeric_fields:
-            values = _numeric(training, name)
+            values = numeric_column(training, name)
             present = values[~np.isnan(values)]
             centre = float(np.median(present)) if present.size else 0.0
             spread = float(present.std()) if present.size else 0.0
@@ -210,7 +223,7 @@ class RowEncoder:
             codes = self._levels[name]
             unknown = self._level_unknown[name]
             token_ids[:, column] = [
-                codes.get(value, unknown) for value in _categorical(rows, name)
+                codes.get(value, unknown) for value in categorical_column(rows, name)
             ]
             field_ids[:, column] = field_index + offset
             mask[:, column] = True
@@ -225,7 +238,7 @@ class RowEncoder:
         missing = np.zeros((n_rows, n_fields), dtype=np.float32)
 
         for column, name in enumerate(self.spec.numeric_fields):
-            raw = _numeric(rows, name)
+            raw = numeric_column(rows, name)
             absent = np.isnan(raw)
             filled = np.where(absent, self._centres[name], raw)
             values[:, column] = (filled - self._centres[name]) / self._scales[name]
@@ -235,12 +248,12 @@ class RowEncoder:
         return values, buckets, missing
 
 
-def _categorical(frame: pd.DataFrame, name: str) -> pd.Series:
+def categorical_column(frame: pd.DataFrame, name: str) -> pd.Series:
     """Values as strings; a missing allergen list is a level, not a dropped row."""
     return frame[name].fillna(NO_ALLERGENS).astype(str)
 
 
-def _numeric(frame: pd.DataFrame, name: str) -> np.ndarray:
+def numeric_column(frame: pd.DataFrame, name: str) -> np.ndarray:
     """Values as floats, with a sentinel zero turned into an honest missing value."""
     values = frame[name].to_numpy(dtype=np.float64, copy=True)
     if name in SENTINEL_FIELDS:
