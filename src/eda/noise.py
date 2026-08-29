@@ -1,9 +1,10 @@
-"""How much a column separates when it has no relationship with the target.
+"""Empirical p-values for the separation of buy rates between groups.
 
-Shuffling ``bought`` across the same groups keeps their sizes and the overall
-rate but breaks any link to the column, so what separation is left is chance.
-Repeating that under many seeds gives the floor a mean and a deviation of its
-own, and a column is only decided when it falls outside ``media +/- desvio``.
+The statistic is always ``max(BTR) - min(BTR)``.  Two null distributions are
+available: shuffling purchases between rows, and reassigning complete purchase
+blocks between queries of the same size.  The second keeps the number of
+purchases and the dependence structure of every query while breaking its link
+to the feature being measured.
 """
 
 from __future__ import annotations
@@ -14,37 +15,35 @@ from functools import lru_cache
 
 import numpy as np
 
-REPS = 2000
-"""Shuffles per seed."""
+REPS = 10_000
+"""Permutations used by a reported empirical p-value."""
 
-SEEDS = 100
+ALPHA = 0.05
+"""Decision threshold for an empirical p-value."""
 
 PERCENTILE = 95
-"""Percentile of one seed's shuffled separations taken as that seed's floor."""
+"""Null percentile shown as a visual reference next to the p-value."""
 
 
 @dataclass(frozen=True)
-class Floor:
-    """The separation chance reaches, and how much that number itself moves."""
+class PermutationResult:
+    """The null reference and empirical p-value for one observed separation."""
 
-    mean: float
-    deviation: float
-
-    @property
-    def low(self) -> float:
-        return self.mean - self.deviation
+    percentile: float
+    p_value: float
+    reps: int
 
     @property
-    def high(self) -> float:
-        return self.mean + self.deviation
+    def significant(self) -> bool:
+        return self.p_value <= ALPHA
 
-    def verdict(self, separation: float) -> str:
-        """``si`` above the range, ``no`` below it, ``?`` inside it."""
-        if separation > self.high:
-            return "si"
-        if separation < self.low:
-            return "no"
-        return "?"
+
+def empirical_p(null: np.ndarray, observed: float) -> float:
+    """Upper-tail empirical p-value, with the standard plus-one correction."""
+    values = np.asarray(null, dtype=float)
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError("la distribucion nula debe ser un vector no vacio")
+    return float((np.count_nonzero(values >= observed) + 1) / (values.size + 1))
 
 
 def _rates(sizes: tuple[int, ...], positives: int, total: int, reps: int, seed: int) -> np.ndarray:
@@ -98,40 +97,146 @@ def separations(
     return _separations(counts, positives, total, reps, seed)
 
 
-def floor(
+def row_test(
     sizes: Sequence[int],
     target: np.ndarray,
-    *,
-    seeds: int = SEEDS,
-    reps: int = REPS,
-    percentile: int = PERCENTILE,
-) -> Floor:
-    """Mean and deviation of the per-seed floors."""
-    counts, positives, total = _shape(sizes, target)
-    per_seed = np.array(
-        [
-            np.percentile(_separations(counts, positives, total, reps, seed), percentile)
-            for seed in range(seeds)
-        ]
-    )
-    return Floor(float(per_seed.mean()), float(per_seed.std()))
-
-
-def exceedance(
     observed: float,
-    sizes: Sequence[int],
-    target: np.ndarray,
     *,
-    seeds: int = SEEDS,
     reps: int = REPS,
-) -> float:
-    """Percent of all shuffles, across every seed, separating at least as much."""
-    counts, positives, total = _shape(sizes, target)
-    shares = [
-        (_separations(counts, positives, total, reps, seed) >= observed).mean()
-        for seed in range(seeds)
-    ]
-    return float(np.mean(shares)) * 100
+    seed: int = 0,
+    percentile: int = PERCENTILE,
+) -> PermutationResult:
+    """Test ``observed`` against purchases shuffled freely between rows."""
+    null = separations(sizes, target, reps=reps, seed=seed)
+    return PermutationResult(
+        percentile=float(np.percentile(null, percentile)),
+        p_value=empirical_p(null, observed),
+        reps=reps,
+    )
+
+
+def _query_positions(query_ids: np.ndarray) -> dict[int, np.ndarray]:
+    """Row positions of queries, stacked by query size."""
+    grouped: dict[object, list[int]] = {}
+    for position, query_id in enumerate(np.asarray(query_ids).tolist()):
+        grouped.setdefault(query_id, []).append(position)
+
+    by_size: dict[int, list[np.ndarray]] = {}
+    for positions in grouped.values():
+        block = np.asarray(positions, dtype=np.int32)
+        by_size.setdefault(len(block), []).append(block)
+    return {size: np.stack(blocks) for size, blocks in by_size.items()}
+
+
+def query_permutations(
+    target: np.ndarray,
+    query_ids: np.ndarray,
+    *,
+    reps: int = REPS,
+    seed: int = 0,
+) -> np.ndarray:
+    """Purchase vectors reassigned between queries of the same size.
+
+    Every source query keeps its complete purchase vector.  Its vector is given
+    to another query with the same row count, and positions inside the assigned
+    vector are randomized because row order is not part of this test.
+    """
+    values = np.asarray(target, dtype=np.int8)
+    queries = np.asarray(query_ids)
+    if values.ndim != 1 or queries.ndim != 1 or len(values) != len(queries):
+        raise ValueError("target y query_ids deben ser vectores del mismo largo")
+    if reps < 1:
+        raise ValueError("reps debe ser positivo")
+
+    rng = np.random.default_rng(seed)
+    permuted = np.empty((reps, len(values)), dtype=np.int8)
+    for positions in _query_positions(queries).values():
+        n_queries, size = positions.shape
+        blocks = values[positions]
+        for rep in range(reps):
+            assigned = blocks[rng.permutation(n_queries)].copy()
+            order = np.argsort(rng.random((n_queries, size)), axis=1)
+            assigned = np.take_along_axis(assigned, order, axis=1)
+            permuted[rep, positions.ravel()] = assigned.ravel()
+    return permuted
+
+
+def group_separations(
+    permutations: np.ndarray,
+    groups: Sequence[np.ndarray],
+    *,
+    batch_size: int = 200,
+) -> np.ndarray:
+    """Separation of explicit row groups over precomputed target permutations."""
+    values = np.asarray(permutations)
+    indices = [np.asarray(group, dtype=np.int32) for group in groups]
+    if values.ndim != 2:
+        raise ValueError("permutations debe tener forma reps x filas")
+    if len(indices) < 2 or any(group.size == 0 for group in indices):
+        raise ValueError("se necesitan al menos dos grupos no vacios")
+
+    out = np.empty(values.shape[0], dtype=float)
+    for start in range(0, values.shape[0], batch_size):
+        stop = min(start + batch_size, values.shape[0])
+        batch = values[start:stop]
+        rates = np.stack([batch[:, group].mean(axis=1) for group in indices], axis=1)
+        out[start:stop] = (rates.max(axis=1) - rates.min(axis=1)) * 100
+    return out
+
+
+def query_test(
+    groups: Sequence[np.ndarray],
+    target: np.ndarray,
+    query_ids: np.ndarray,
+    observed: float,
+    *,
+    reps: int = REPS,
+    seed: int = 0,
+    percentile: int = PERCENTILE,
+    permutations: np.ndarray | None = None,
+) -> PermutationResult:
+    """Test ``observed`` against a null that preserves complete query blocks."""
+    shuffled = (
+        query_permutations(target, query_ids, reps=reps, seed=seed)
+        if permutations is None
+        else np.asarray(permutations)
+    )
+    if shuffled.shape != (reps, len(target)):
+        raise ValueError("las permutaciones no coinciden con reps y el largo del target")
+    null = group_separations(shuffled, groups)
+    return PermutationResult(
+        percentile=float(np.percentile(null, percentile)),
+        p_value=empirical_p(null, observed),
+        reps=reps,
+    )
+
+
+def query_rate_test(
+    groups: Sequence[np.ndarray],
+    rates: np.ndarray,
+    observed: float,
+    *,
+    reps: int = REPS,
+    seed: int = 0,
+    percentile: int = PERCENTILE,
+) -> PermutationResult:
+    """Permute one observed rate per query between query-level groups."""
+    values = np.asarray(rates, dtype=float)
+    indices = [np.asarray(group, dtype=np.int32) for group in groups]
+    if values.ndim != 1 or len(indices) < 2:
+        raise ValueError("se necesitan tasas por query y al menos dos grupos")
+
+    rng = np.random.default_rng(seed)
+    null = np.empty(reps, dtype=float)
+    for rep in range(reps):
+        shuffled = rng.permutation(values)
+        means = [shuffled[group].mean() for group in indices]
+        null[rep] = (max(means) - min(means)) * 100
+    return PermutationResult(
+        percentile=float(np.percentile(null, percentile)),
+        p_value=empirical_p(null, observed),
+        reps=reps,
+    )
 
 
 def level_bands(

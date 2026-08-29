@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.eda import report
+from src.eda import noise, report
 from src.eda.contribution import absorption, holding, separation
 from src.eda.plots import bar_by_bucket
 from src.eda.rates import rate_by_bucket
@@ -17,6 +17,24 @@ PLACEMENTS: tuple[tuple[str, str], ...] = (
     ("price_position", "posicion en la ventana del filtro"),
     ("price_rank", "puesto entre los precios que mostro la busqueda"),
 )
+
+
+def _query_result(
+    frame: pd.DataFrame,
+    column: str,
+    table: pd.DataFrame,
+    observed: float,
+    permutations,
+) -> noise.PermutationResult:
+    codes = pd.qcut(frame[column], BUCKETS, labels=False, duplicates="drop").to_numpy()
+    groups = [(codes == code).nonzero()[0] for code in range(len(table))]
+    return noise.query_test(
+        groups,
+        frame["bought"].to_numpy(),
+        frame["query_id"].to_numpy(),
+        observed,
+        permutations=permutations,
+    )
 
 
 def analyse(frame: pd.DataFrame, figures: Path) -> dict[str, pd.DataFrame]:
@@ -48,6 +66,9 @@ def analyse(frame: pd.DataFrame, figures: Path) -> dict[str, pd.DataFrame]:
     )
 
     tables: dict[str, pd.DataFrame] = {"price": absolute}
+    query_permutations = noise.query_permutations(
+        frame["bought"].to_numpy(), frame["query_id"].to_numpy()
+    )
     print("\nValores distintos que toma cada forma de ubicar el precio:")
     for column, label in PLACEMENTS:
         report.value(f"  {column} ({label})", frame[column].nunique())
@@ -62,9 +83,22 @@ def analyse(frame: pd.DataFrame, figures: Path) -> dict[str, pd.DataFrame]:
             path=figures / f"02-precio-{column.replace('_', '-')}.png",
             target=frame["bought"].to_numpy(),
         )
-        spread, floor = separation(frame, column, buckets=BUCKETS)
-        report.value(f"Separacion de {column}", f"{spread:.1f} pp contra un piso de {floor.mean:.2f} ± {floor.deviation:.2f}")
+        spread, result = separation(frame, column, buckets=BUCKETS)
+        by_query = _query_result(frame, column, table, spread, query_permutations)
+        report.value(
+            f"Separacion de {column}",
+            f"{spread:.1f} pp; p filas={result.p_value:.4f};"
+            f" p query={by_query.p_value:.4f}",
+        )
         tables[column] = table
+        tables[f"{column}_pvalues"] = pd.DataFrame(
+            {
+                "p95": [result.percentile, by_query.percentile],
+                "p_value": [result.p_value, by_query.p_value],
+                "significativa": [result.significant, by_query.significant],
+            },
+            index=["filas", "query_id"],
+        )
 
     for other in ("price_rank", "price"):
         for held, read in (("price_position", other), (other, "price_position")):

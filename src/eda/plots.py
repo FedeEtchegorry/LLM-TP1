@@ -21,6 +21,7 @@ DPI = 120
 BAR_COLOR = "#4C72B0"
 NOISE_COLOR = "#B0B0B0"
 REFERENCE_COLOR = "#C44E52"
+QUERY_REFERENCE_COLOR = "#8172B2"
 
 BUILT_COLOR = "#55A868"
 """Bar fill for a column the analysis built, in the ranking chart."""
@@ -141,53 +142,69 @@ def bar_by_bucket(
     return _save(figure, path)
 
 
-def bar_separation_vs_floor(
+def bar_separation_with_pvalues(
     table: pd.DataFrame,
     *,
     title: str,
     path: Path,
 ) -> Path:
-    """One bar per column: its separation, against the floor its shape reaches.
-
-    Hue says where the column comes from, the red mark says what it has to beat,
-    and a faded bar is one that does not beat it.
-    """
+    """One separation bar with row and query-block null references."""
     figure, axes = plt.subplots(figsize=(10, 7))
     labels = [str(column) for column in table.index]
     separation = table["separacion"].to_numpy()
-    low = table["piso_lo"].to_numpy()
-    high = table["piso_hi"].to_numpy()
+    row_reference = table["p95_filas"].to_numpy()
+    query_reference = table["p95_query"].to_numpy()
+    row_p = table["p_filas"].to_numpy()
+    query_p = table["p_query"].to_numpy()
     built = (table["origen"] == "construida").to_numpy()
     positions = np.arange(len(labels))
 
-    for y, (value, lo, hi, is_built) in enumerate(zip(separation, low, high, built)):
-        clears = value > hi
+    for y, (value, p_row, p_query, ref_row, ref_query, is_built) in enumerate(
+        zip(separation, row_p, query_p, row_reference, query_reference, built)
+    ):
         axes.barh(
             y,
             value,
             color=BUILT_COLOR if is_built else BAR_COLOR,
-            alpha=1.0 if clears else 0.38,
+            alpha=1.0 if p_query <= noise.ALPHA else 0.38,
             zorder=2,
         )
-        axes.add_patch(
-            plt.Rectangle(
-                (lo, y - 0.42), max(hi - lo, 0.05), 0.84,
-                color=REFERENCE_COLOR, alpha=0.9, zorder=4,
-            )
+        axes.vlines(
+            ref_row,
+            y - 0.38,
+            y,
+            color=REFERENCE_COLOR,
+            linewidth=2,
+            zorder=4,
         )
-        axes.text(max(value, hi) + 0.6, y, f"{value:.1f} vs {(lo + hi) / 2:.1f}", va="center", fontsize=8, zorder=5)
+        axes.vlines(
+            ref_query,
+            y,
+            y + 0.38,
+            color=QUERY_REFERENCE_COLOR,
+            linewidth=2,
+            zorder=4,
+        )
+        axes.text(
+            max(value, ref_row, ref_query) + 0.6,
+            y,
+            f"{value:.1f} | p filas={p_row:.4f} | p query={p_query:.4f}",
+            va="center",
+            fontsize=7,
+            zorder=5,
+        )
 
     handles = [
-        plt.Rectangle((0, 0), 1, 1, color=BAR_COLOR, label="campo del dataset - supera"),
-        plt.Rectangle((0, 0), 1, 1, color=BAR_COLOR, alpha=0.38, label="campo del dataset - no supera"),
-        plt.Rectangle((0, 0), 1, 1, color=BUILT_COLOR, label="construida por el analisis - supera"),
-        plt.Rectangle((0, 0), 1, 1, color=BUILT_COLOR, alpha=0.38, label="construida por el analisis - no supera"),
-        plt.Rectangle((0, 0), 1, 1, color=REFERENCE_COLOR, alpha=0.9, label="piso de ruido (media +/- desvio)"),
+        plt.Rectangle((0, 0), 1, 1, color=BAR_COLOR, label="campo del dataset - p query <= 0.05"),
+        plt.Rectangle((0, 0), 1, 1, color=BAR_COLOR, alpha=0.38, label="campo del dataset - p query > 0.05"),
+        plt.Rectangle((0, 0), 1, 1, color=BUILT_COLOR, label="construida - p query <= 0.05"),
+        plt.Line2D([0], [0], color=REFERENCE_COLOR, linewidth=2, label="percentil 95 - filas"),
+        plt.Line2D([0], [0], color=QUERY_REFERENCE_COLOR, linewidth=2, label="percentil 95 - query_id"),
     ]
     axes.set_yticks(positions)
     axes.set_yticklabels(labels, fontsize=8)
     axes.invert_yaxis()
-    axes.set_xlim(0, max(separation.max(), high.max()) * 1.24)
+    axes.set_xlim(0, max(separation.max(), row_reference.max(), query_reference.max()) * 1.38)
     axes.set_xlabel("Separacion (puntos porcentuales)")
     axes.set_title(title)
     axes.legend(handles=handles, loc="lower right", fontsize=8)

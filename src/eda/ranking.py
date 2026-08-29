@@ -15,8 +15,8 @@ import pandas as pd
 
 from src.eda import noise, report
 from src.eda.aspects.composition import NO_ALLERGENS, NUTRITION_SENTINEL
-from src.eda.plots import bar_separation_vs_floor
-from src.eda.rates import SMALL_GROUP, rate_by_bucket, rate_by_level
+from src.eda.plots import bar_separation_with_pvalues
+from src.eda.rates import rate_by_bucket, rate_by_level
 
 BUCKETS = 10
 """Quantile buckets used for a numeric column, unless its aspect uses fewer."""
@@ -81,36 +81,89 @@ BUCKET_COLUMNS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class Measurement:
-    """One column, how it is grouped, and how it stands against its own floor."""
+    """One column measured against row-wise and query-wise nulls."""
 
     column: str
     grouping: str
     groups: int
+    eligible_groups: int
+    excluded_rows: int
     smallest: int
     separation: float
-    floor: noise.Floor
-    exceedance: float
-    """Percent of shuffles separating at least as much as this column does."""
-
-    @property
-    def verdict(self) -> str:
-        return self.floor.verdict(self.separation)
+    row_result: noise.PermutationResult
+    query_result: noise.PermutationResult
 
 
 def _measure(
-    table: pd.DataFrame, column: str, grouping: str, target: np.ndarray
+    table: pd.DataFrame,
+    column: str,
+    grouping: str,
+    target: np.ndarray,
+    groups: list[np.ndarray],
+    query_ids: np.ndarray,
+    query_permutations: np.ndarray,
+    *,
+    reps: int,
+    seed: int,
+    query_result: noise.PermutationResult | None = None,
 ) -> Measurement:
-    large = table[table["rows"] >= SMALL_GROUP]
-    separation = float(large["rate"].max() - large["rate"].min()) * 100
-    sizes = large["rows"].to_numpy()
+    separation = float(table["rate"].max() - table["rate"].min()) * 100
+    sizes = table["rows"].to_numpy()
     return Measurement(
         column=column,
         grouping=grouping,
         groups=len(table),
+        eligible_groups=len(table),
+        excluded_rows=0,
         smallest=int(table["rows"].min()),
         separation=separation,
-        floor=noise.floor(sizes, target),
-        exceedance=noise.exceedance(separation, sizes, target),
+        row_result=noise.row_test(sizes, target, separation, reps=reps, seed=seed),
+        query_result=query_result
+        or noise.query_test(
+            groups,
+            target,
+            query_ids,
+            separation,
+            reps=reps,
+            seed=seed,
+            permutations=query_permutations,
+        ),
+    )
+
+
+def _level_groups(frame: pd.DataFrame, column: str, table: pd.DataFrame) -> list[np.ndarray]:
+    """Row positions of every observed level."""
+    values = frame[column]
+    groups = []
+    for level in table.index:
+        mask = values.isna() if pd.isna(level) else values.eq(level)
+        groups.append(np.flatnonzero(mask.to_numpy()))
+    return groups
+
+
+def _bucket_groups(
+    frame: pd.DataFrame, column: str, table: pd.DataFrame, *, buckets: int
+) -> list[np.ndarray]:
+    """Row positions of every observed quantile bucket."""
+    codes = pd.qcut(frame[column], buckets, labels=False, duplicates="drop").to_numpy()
+    return [np.flatnonzero(codes == code) for code in range(len(table))]
+
+
+def _products_in_query_result(
+    frame: pd.DataFrame, observed: float, *, reps: int, seed: int
+) -> noise.PermutationResult:
+    """Query-level test for a feature that is the query size itself."""
+    per_query = frame.groupby("query_id")["bought"].agg(size="size", rate="mean")
+    rows_per_level = per_query.groupby("size")["size"].sum()
+    levels = rows_per_level.index
+    sizes = per_query["size"].to_numpy()
+    groups = [np.flatnonzero(sizes == level) for level in levels]
+    return noise.query_rate_test(
+        groups,
+        per_query["rate"].to_numpy(),
+        observed,
+        reps=reps,
+        seed=seed,
     )
 
 
@@ -129,52 +182,109 @@ def derived(frame: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def measurements(frame: pd.DataFrame) -> list[Measurement]:
-    """Measure every column, widest separation first."""
+def measurements(
+    frame: pd.DataFrame, *, reps: int = noise.REPS, seed: int = 0
+) -> list[Measurement]:
+    """Measure every column under row and query-block permutations."""
     enriched = derived(frame)
     target = enriched["bought"].to_numpy()
+    query_ids = enriched["query_id"].to_numpy()
+    query_permutations = noise.query_permutations(target, query_ids, reps=reps, seed=seed)
 
-    results = [
-        _measure(rate_by_level(enriched, column), column, "nivel", target)
-        for column in LEVEL_COLUMNS
-    ]
-    results += [
-        _measure(rate_by_bucket(enriched, column, buckets=BUCKETS), column, "decil", target)
-        for column in BUCKET_COLUMNS
-    ]
+    results = []
+    for position, column in enumerate(LEVEL_COLUMNS):
+        table = rate_by_level(enriched, column)
+        observed = float(table["rate"].max() - table["rate"].min()) * 100
+        query_result = (
+            _products_in_query_result(
+                enriched, observed, reps=reps, seed=seed + position + 1
+            )
+            if column == "products_in_query"
+            else None
+        )
+        results.append(
+            _measure(
+                table,
+                column,
+                "nivel",
+                target,
+                _level_groups(enriched, column, table),
+                query_ids,
+                query_permutations,
+                reps=reps,
+                seed=seed + position + 1,
+                query_result=query_result,
+            )
+        )
+
+    for position, column in enumerate(BUCKET_COLUMNS, start=len(LEVEL_COLUMNS)):
+        table = rate_by_bucket(enriched, column, buckets=BUCKETS)
+        results.append(
+            _measure(
+                table,
+                column,
+                "decil",
+                target,
+                _bucket_groups(enriched, column, table, buckets=BUCKETS),
+                query_ids,
+                query_permutations,
+                reps=reps,
+                seed=seed + position + 1,
+            )
+        )
+
+    del query_permutations
 
     # Aspect 5 keeps the sentinel out of the buckets; the ranking reads the column
     # the same way it is read there, so the two tables cannot disagree.
     scored = enriched[enriched["nutrition_score"] != NUTRITION_SENTINEL]
+    scored_target = scored["bought"].to_numpy()
+    scored_queries = scored["query_id"].to_numpy()
+    scored_permutations = noise.query_permutations(
+        scored_target, scored_queries, reps=reps, seed=seed + 10_000
+    )
+    nutrition = rate_by_bucket(scored, "nutrition_score", buckets=NUTRITION_BUCKETS)
     results.append(
         _measure(
-            rate_by_bucket(scored, "nutrition_score", buckets=NUTRITION_BUCKETS),
+            nutrition,
             "nutrition_score",
             "tramo",
-            scored["bought"].to_numpy(),
+            scored_target,
+            _bucket_groups(
+                scored, "nutrition_score", nutrition, buckets=NUTRITION_BUCKETS
+            ),
+            scored_queries,
+            scored_permutations,
+            reps=reps,
+            seed=seed + len(LEVEL_COLUMNS) + len(BUCKET_COLUMNS) + 1,
         )
     )
 
     return sorted(results, key=lambda m: m.separation, reverse=True)
 
 
-def table(frame: pd.DataFrame) -> pd.DataFrame:
+def table(
+    frame: pd.DataFrame, *, reps: int = noise.REPS, seed: int = 0
+) -> pd.DataFrame:
+    measured = measurements(frame, reps=reps, seed=seed)
     rows = [
         {
             "columna": m.column,
             "origen": "construida" if m.column in CONSTRUCTED else "del dataset",
             "agrupada por": m.grouping,
             "grupos": m.groups,
+            "grupos evaluados": m.eligible_groups,
+            "filas excluidas": m.excluded_rows,
             "grupo mas chico": m.smallest,
             "separacion": round(m.separation, 1),
-            "piso": round(m.floor.mean, 2),
-            "desvio": round(m.floor.deviation, 2),
-            "piso_lo": m.floor.low,
-            "piso_hi": m.floor.high,
-            "% del azar que la supera": round(m.exceedance, 1),
-            "supera": m.verdict,
+            "p95_filas": round(m.row_result.percentile, 2),
+            "p_filas": m.row_result.p_value,
+            "p95_query": round(m.query_result.percentile, 2),
+            "p_query": m.query_result.p_value,
+            "significativa_filas": m.row_result.significant,
+            "significativa_query": m.query_result.significant,
         }
-        for m in measurements(frame)
+        for m in measured
     ]
     return pd.DataFrame(rows).set_index("columna")
 
@@ -183,51 +293,61 @@ SHOWN = [
     "origen",
     "agrupada por",
     "grupos",
+    "grupos evaluados",
+    "filas excluidas",
     "grupo mas chico",
     "separacion",
-    "piso",
-    "desvio",
-    "% del azar que la supera",
-    "supera",
+    "p95_filas",
+    "p_filas",
+    "p95_query",
+    "p_query",
+    "significativa_query",
 ]
-"""Columns printed to the console; ``piso_lo``/``piso_hi`` only feed the chart."""
+"""Columns printed to the console."""
 
 
-def markdown(frame: pd.DataFrame) -> str:
+def markdown(
+    frame: pd.DataFrame, *, reps: int = noise.REPS, seed: int = 0
+) -> str:
     """The same ranking as a Markdown table, for pasting into the write-up."""
+    ranking = table(frame, reps=reps, seed=seed)
     header = (
-        "| Columna | Agrupada por | Grupos | Grupo más chico | Separación |"
-        " Piso de ruido | % del azar que la supera | ¿Supera? |\n"
-        "|---|---|---:|---:|---:|---:|---:|---|"
+        "| Columna | Grupos | Separación | p95 filas | p filas |"
+        " p95 query | p query |\n"
+        "|---|---:|---:|---:|---:|---:|---:|"
     )
     lines = [
-        f"| {_label(m.column)} | {m.grouping} | {m.groups} | {m.smallest:,} |"
-        f" {m.separation:.1f} pp | {m.floor.mean:.2f} ± {m.floor.deviation:.2f} pp |"
-        f" {m.exceedance:.0f}% |"
-        f" {'**sí**' if m.verdict == 'si' else m.verdict} |".replace(",", ".")
-        for m in measurements(frame)
+        f"| {_label(column)} | {int(row['grupos evaluados'])} |"
+        f" {row['separacion']:.1f} pp | {row['p95_filas']:.2f} |"
+        f" {row['p_filas']:.4f} | {row['p95_query']:.2f} |"
+        f" {row['p_query']:.4f} |".replace(",", ".")
+        for column, row in ranking.iterrows()
     ]
     return "\n".join([header, *lines])
 
 
-def analyse(frame: pd.DataFrame, figures: Path) -> pd.DataFrame:
-    report.heading("Ranking - Separacion de cada columna contra su piso de ruido")
+def analyse(
+    frame: pd.DataFrame,
+    figures: Path,
+    *,
+    reps: int = noise.REPS,
+    seed: int = 0,
+) -> pd.DataFrame:
+    report.heading("Ranking - p-values por filas y por bloques de query_id")
 
-    ranking = table(frame)
+    ranking = table(frame, reps=reps, seed=seed)
     print(
-        "\nPiso = separacion que alcanza una columna de la misma forma (mismos"
-        "\ngrupos, mismos tamanos) al barajar 'bought'. Cada una de las"
-        f"\n{noise.SEEDS} semillas da su percentil {noise.PERCENTILE} sobre"
-        f" {noise.REPS} barajadas;"
-        "\nel piso es la media de esas 100 y el desvio, cuanto se mueven entre si."
-        "\nSupera: 'si' arriba de piso+desvio, 'no' abajo de piso-desvio,"
-        "\n'?' adentro del rango, donde la simulacion no alcanza para decidir."
+        "\np = (1 + permutaciones con separacion >= observada) / (1 + total)."
+        f"\nSe usan {reps} permutaciones. p95 es una referencia visual;"
+        f" la decision simple usa p <= {noise.ALPHA:.2f}."
+        "\nFilas baraja compras entre impresiones. Query reasigna bloques completos"
+        "\nentre query_id del mismo tamano y desordena posiciones dentro del bloque."
     )
     print(f"\n{ranking[SHOWN].to_string()}")
-    bar_separation_vs_floor(
+    bar_separation_with_pvalues(
         ranking,
-        title="Separacion de cada columna contra el piso que alcanza por azar",
-        path=figures / "07-ranking-piso-de-ruido.png",
+        title="Separacion observada y percentil 95: filas contra query_id",
+        path=figures / "07-ranking-pvalues.png",
     )
     return ranking
 

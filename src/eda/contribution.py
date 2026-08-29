@@ -1,6 +1,6 @@
 """How much a column separates, alone or with another one held fixed.
 
-Two columns can each clear the floor of :mod:`src.eda.noise` and still be the
+Two columns can each have a small p-value under :mod:`src.eda.noise` and still be the
 same information said twice, so a column that passed there is read again inside
 the buckets of one already kept. The reading is asymmetric on purpose: A absorbs
 B when B stops separating inside A but A keeps separating inside B, and that is
@@ -12,18 +12,23 @@ from __future__ import annotations
 import pandas as pd
 
 from src.eda import noise
-from src.eda.rates import SMALL_GROUP, rate_by_bucket, rate_by_level
+from src.eda.rates import rate_by_bucket, rate_by_level
 
 BUCKETS = 5
 
 
 def separation(
-    frame: pd.DataFrame, column: str, *, buckets: int = BUCKETS
-) -> tuple[float, noise.Floor] | None:
-    """Separation of ``column`` over ``frame``, against the floor of that shape.
+    frame: pd.DataFrame,
+    column: str,
+    *,
+    buckets: int = BUCKETS,
+    reps: int = noise.REPS,
+    seed: int = 0,
+) -> tuple[float, noise.PermutationResult] | None:
+    """Separation of ``column`` and its row-wise empirical p-value.
 
-    ``None`` when fewer than two groups clear ``SMALL_GROUP``: there is nothing
-    left to separate.
+    ``None`` when the slice has fewer than two observed groups: there is nothing
+    to separate.
     """
     numeric = pd.api.types.is_numeric_dtype(frame[column])
     table = (
@@ -31,11 +36,17 @@ def separation(
         if numeric
         else rate_by_level(frame, column)
     )
-    table = table[table["rows"] >= SMALL_GROUP]
     if len(table) < 2:
         return None
     spread = float(table["rate"].max() - table["rate"].min()) * 100
-    return spread, noise.floor(table["rows"].to_numpy(), frame["bought"].to_numpy())
+    result = noise.row_test(
+        table["rows"].to_numpy(),
+        frame["bought"].to_numpy(),
+        spread,
+        reps=reps,
+        seed=seed,
+    )
+    return spread, result
 
 
 def _parts(frame: pd.DataFrame, held: str):
@@ -53,14 +64,15 @@ def holding(frame: pd.DataFrame, candidate: str, held: str) -> pd.DataFrame:
         reading = separation(part, candidate)
         if reading is None:
             continue
-        spread, floor = reading
+        spread, result = reading
         rows.append(
             {
                 f"tramo de {held}": label(key),
                 "filas": len(part),
                 f"separacion de {candidate}": round(spread, 1),
-                "piso": round(floor.mean, 2),
-                "supera": floor.verdict(spread),
+                "p95": round(result.percentile, 2),
+                "p_value": round(result.p_value, 4),
+                "significativa": result.significant,
             }
         )
     return pd.DataFrame(rows).set_index(f"tramo de {held}")
@@ -75,7 +87,7 @@ def absorption(frame: pd.DataFrame, first: str, second: str) -> pd.DataFrame:
             {
                 "lectura": f"{candidate} fijando {held}",
                 "tramos": len(table),
-                "supera en": int((table["supera"] == "si").sum()),
+                "significativa en": int(table["significativa"].sum()),
             }
         )
     return pd.DataFrame(rows).set_index("lectura")

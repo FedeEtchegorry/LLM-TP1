@@ -7,9 +7,6 @@ import pandas as pd
 TARGET = "bought"
 """One row is one impression; its rate over a group is that group's BTR."""
 
-SMALL_GROUP = 100
-"""Groups under this many rows are set aside: their rate moves too much to read."""
-
 
 def overall_rate(frame: pd.DataFrame) -> float:
     return float(frame[TARGET].mean())
