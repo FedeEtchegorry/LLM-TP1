@@ -1,0 +1,119 @@
+[DEFAULT]
+model              = transformer
+
+# what enters the sequence
+text_fields        = title, description, ingredients
+categorical_fields = category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+
+# the architecture
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+
+
+# ==============================================================================
+# The ladder. Each rung is one run that is both a slide and an ablation point,
+# so no configuration is ever trained twice.
+#   L1 -> L2  is axis B (does attention buy anything over an average?)
+#   L2 -> L3  is axis G (do the tabular columns add to the text?)
+#   L3 -> L4  is axis A (is the bucket term worth the +0.137 AP the EDA predicts?)
+# ==============================================================================
+
+[L0 linear bar]
+# Not the Transformer: the logistic regression docs/EDA.md quotes at AP 0.813.
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+
+[L1 bag of embeddings]
+# Text only, no attention at all. With no layers the [CLS] position is never
+# updated, so this rung has to pool by mean -- which is the dilution it measures.
+n_layers           = 0
+pooling            = mean
+categorical_fields =
+numeric_fields     =
+
+[L2 text with attention]
+categorical_fields =
+numeric_fields     =
+
+[L3 tabular, numbers affine only]
+numeric_embedding  = affine
+
+[L4 tabular, numbers affine and bucketed]
+# The base configuration; every sweep below changes exactly one thing from here.
+
+
+# ==============================================================================
+# Module alternatives, one run per point, all measured against L4.
+# ==============================================================================
+
+# --- axis B: depth -------------------------------------------------------------
+[B 1 layer]
+n_layers           = 1
+
+[B 4 layers]
+n_layers           = 4
+
+# --- axis C: heads, at a fixed width -------------------------------------------
+[C 1 head]
+n_heads            = 1
+
+[C 2 heads]
+n_heads            = 2
+
+[C 8 heads]
+n_heads            = 8
+
+# --- axis D: width -------------------------------------------------------------
+[D d_model 32]
+d_model            = 32
+
+[D d_model 128]
+d_model            = 128
+
+# --- axis E: positional encoding -----------------------------------------------
+# The text is a template, so we expect this axis to be flat. A predicted null
+# result that comes out null is still a result.
+[E no positional]
+positional         = none
+
+[E sinusoidal]
+positional         = sinusoidal
+
+# --- axis F: pooling -----------------------------------------------------------
+[F mean pooling]
+pooling            = mean
+
+[F attention pooling]
+pooling            = attention
+
+# --- axis G: which fields ------------------------------------------------------
+# title and description each reach AP 0.672 alone under a linear bag of words,
+# so we expect these three to tie. If they do not, something is overfitting.
+[G title only]
+text_fields        = title
+
+[G description only]
+text_fields        = description
+
+[G title and description]
+text_fields        = title, description
+
+[G tabular only]
+text_fields        =
+
+# --- axis H: regularisation ----------------------------------------------------
+# The train/validation curves come free from every run above; these two move the
+# knob that the curves say matters.
+[H no dropout]
+dropout            = 0.0
+
+[H dropout 0.3]
+dropout            = 0.3

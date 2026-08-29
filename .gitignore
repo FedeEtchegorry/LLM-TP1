@@ -224,3 +224,6 @@ tests/
 
 # Generated figures -- regenerate with the run_* scripts
 *.png
+
+# Trained weights -- large and regenerable; the JSON metrics beside them are not
+results/weights/
