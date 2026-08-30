@@ -25,7 +25,7 @@ RESULTS_DIR = Path("results")
 WEIGHTS_DIR = "weights"
 """Trained parameters, one file per fold. Regenerable, so ``.gitignore`` skips them."""
 
-SCHEMA = 1
+SCHEMA = 2
 """Bumped when the stored shape changes, so an old file is skipped, not misread."""
 
 
@@ -66,11 +66,42 @@ def save(
             "average_precision_mean": result.average_precision_mean,
             "average_precision_std": result.average_precision_std,
         },
-        "folds": [asdict(fold) for fold in result.folds],
+        "folds": _folds_with_diagnostics(result.folds, curves or []),
         "curves": curves or [],
     }
     path.write_text(json.dumps(document, indent=2, default=list), encoding="utf-8")
     return path
+
+
+def _folds_with_diagnostics(folds, curves: list[dict]) -> list[dict]:
+    """Each fold's stored metrics, plus what the curve looked like at ``best_epoch``.
+
+    A model with no epochs (the logistic bar) still gets a valid row, with these
+    fields set to ``None`` rather than omitted, so ``fold_frame`` never has to guess
+    whether a column is missing or genuinely absent for that regime.
+    """
+    curves_by_fold = {curve["fold_index"]: curve for curve in curves}
+    rows = []
+    for fold in folds:
+        row = asdict(fold)
+        epochs = curves_by_fold.get(fold.fold_index, {}).get("epochs", [])
+        if not epochs:
+            row.update(
+                best_epoch=None, train_ap=None, train_loss=None,
+                validation_loss=None, gap=None,
+            )
+        else:
+            best_epoch = curves_by_fold[fold.fold_index]["best_epoch"]
+            record = next(e for e in epochs if e["epoch"] == best_epoch)
+            row.update(
+                best_epoch=best_epoch,
+                train_ap=record["train_ap"],
+                train_loss=record["train_loss"],
+                validation_loss=record["validation_loss"],
+                gap=record["train_ap"] - record["validation_ap"],
+            )
+        rows.append(row)
+    return rows
 
 
 def load(
@@ -85,7 +116,16 @@ def load(
         return None
     return EvaluationResult(
         name=document["name"],
-        folds=tuple(FoldScore(**fold) for fold in document["folds"]),
+        folds=tuple(
+            FoldScore(
+                fold_index=fold["fold_index"],
+                roc_auc=fold["roc_auc"],
+                average_precision=fold["average_precision"],
+                n_train=fold["n_train"],
+                n_scored=fold["n_scored"],
+            )
+            for fold in document["folds"]
+        ),
     )
 
 
