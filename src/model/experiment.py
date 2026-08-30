@@ -35,6 +35,7 @@ from src.model.results import (
     load,
     load_predictions,
     save,
+    save_fold_predictions,
     save_predictions,
     save_weights,
 )
@@ -128,13 +129,14 @@ def run_one(
             return recorded, "recorded"
 
     trained: list[TrainedFold] = []
+    predicted: list[np.ndarray] = []
     folds = folds_for(config, partitions)
     started = time.perf_counter()
     result = evaluate_across_folds(
         config.name,
         target_of(frame),
         folds,
-        _reporting(scorer_for(config, frame, trained), len(folds.folds), started),
+        _reporting(_capturing(scorer_for(config, frame, trained), predicted), len(folds.folds), started),
     )
     seconds = time.perf_counter() - started
 
@@ -144,6 +146,18 @@ def run_one(
         seconds=seconds,
         curves=_curves(trained),
         device=_device_label(),
+        directory=directory,
+    )
+    # The validation scores, one array per fold, kept apart from the record itself:
+    # ROC/PR, calibration and precision@k need row-level scores that the aggregated
+    # metrics in ``result`` do not carry, and no CV run had anywhere to put them
+    # before this.
+    save_fold_predictions(
+        config,
+        {
+            fold.fold_index: (fold.validation_indices, predicted[position])
+            for position, fold in enumerate(folds.folds)
+        },
         directory=directory,
     )
     # Only our own model's weights are kept. The linear regimes have nothing worth
@@ -231,6 +245,18 @@ def sweep_note(trained_seconds: float, trained: int, left: int) -> str:
     if not trained:
         return f"   [{left} left]"
     return f"   [{left} left, ~{_clock(trained_seconds / trained * left)}]"
+
+
+def _capturing(scorer: ScoreFold, captured: list[np.ndarray]) -> ScoreFold:
+    """Keep every fold's predicted scores, in call order, without changing what the
+    caller sees returned."""
+
+    def score_fold(train_indices, scored_indices):
+        scores = scorer(train_indices, scored_indices)
+        captured.append(np.asarray(scores, dtype=np.float64))
+        return scores
+
+    return score_fold
 
 
 def _reporting(scorer: ScoreFold, total: int, started: float) -> ScoreFold:

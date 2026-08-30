@@ -76,8 +76,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def fold_zero(config: RunConfig, directory: str) -> dict | None:
     """One run's fold-0 record: the metrics, the parameters trained and the seconds.
 
-    ``seconds`` in the stored document covers every fold the run did, so it is divided
-    back down. That is an average, not a stopwatch on fold 0, and the column says so.
+    ``seconds`` is fold 0's own wall time, timed by the harness around that fold's
+    ``score_fold`` call -- a stopwatch on fold 0, not the run's total divided back down.
     """
     stored = document(config, directory)
     if stored is None:
@@ -94,7 +94,7 @@ def fold_zero(config: RunConfig, directory: str) -> dict | None:
         "roc_auc": first["roc_auc"],
         "average_precision": first["average_precision"],
         "parameters": curves.get(0, {}).get("parameters"),
-        "seconds_per_fold": stored["seconds"] / max(len(folds), 1),
+        "seconds_per_fold": first["seconds"],
     }
 
 

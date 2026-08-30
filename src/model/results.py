@@ -25,7 +25,7 @@ RESULTS_DIR = Path("results")
 WEIGHTS_DIR = "weights"
 """Trained parameters, one file per fold. Regenerable, so ``.gitignore`` skips them."""
 
-SCHEMA = 2
+SCHEMA = 3
 """Bumped when the stored shape changes, so an old file is skipped, not misread."""
 
 
@@ -123,6 +123,7 @@ def load(
                 average_precision=fold["average_precision"],
                 n_train=fold["n_train"],
                 n_scored=fold["n_scored"],
+                seconds=fold["seconds"],
             )
             for fold in document["folds"]
         ),
@@ -192,6 +193,67 @@ def predictions_path(
     return Path(directory) / f"{config.digest}.predictions.npy"
 
 
+FOLD_PREDICTIONS_DIR = "predictions"
+"""Cross-validation scores, one file per digest. Regenerable, like the weights --
+never read by ``fold_frame`` or anything the selection table is built from."""
+
+
+def fold_predictions_path(config: RunConfig, directory: Path | str = RESULTS_DIR) -> Path:
+    """``results/predictions/<digest>.npz``, apart from both the record and the
+    holdout's own ``<digest>.predictions.npy``."""
+    return Path(directory) / FOLD_PREDICTIONS_DIR / f"{config.digest}.npz"
+
+
+def save_fold_predictions(
+    config: RunConfig,
+    per_fold: dict,
+    *,
+    directory: Path | str = RESULTS_DIR,
+) -> Path:
+    """Every fold's validation-row indices and predicted scores, kept apart from the
+    JSON record so ROC/PR, calibration and precision@k can be drawn for a
+    cross-validation run and not only for the one holdout run.
+
+    ``per_fold`` maps ``fold_index -> (indices, scores)``. Stored as compressed
+    ``.npz`` rather than folded into the record: these are floats, one per scored row,
+    and JSON would inflate them for no reason. Neither the digest nor ``SCHEMA``
+    changes for this -- the file is cache-adjacent evidence, exactly like the saved
+    weights, not part of what the run is selected on.
+    """
+    import numpy as np
+
+    path = fold_predictions_path(config, directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {}
+    for fold_index, (indices, scores) in per_fold.items():
+        payload[f"indices_{fold_index}"] = np.asarray(indices, dtype=np.int64)
+        payload[f"scores_{fold_index}"] = np.asarray(scores, dtype=np.float64)
+    np.savez_compressed(path, **payload)
+    return path
+
+
+def load_fold_predictions(
+    config: RunConfig, directory: Path | str = RESULTS_DIR
+) -> dict | None:
+    """``{fold_index: (indices, scores)}`` for every fold, or ``None`` if this run
+    never had its cross-validation scores saved -- an older record is still valid,
+    just without the figures that need row-level scores."""
+    import numpy as np
+
+    path = fold_predictions_path(config, directory)
+    if not path.exists():
+        return None
+    with np.load(path) as archive:
+        fold_indices = sorted({int(name.rsplit("_", 1)[-1]) for name in archive.files})
+        return {
+            fold_index: (
+                archive[f"indices_{fold_index}"],
+                archive[f"scores_{fold_index}"],
+            )
+            for fold_index in fold_indices
+        }
+
+
 def save_predictions(
     config: RunConfig, predicted, *, directory: Path | str = RESULTS_DIR
 ) -> Path:
@@ -235,7 +297,7 @@ def fold_frame(directory: Path | str = RESULTS_DIR) -> pd.DataFrame:
                     "name": document["name"],
                     "digest": document["digest"],
                     "recorded_at": document["recorded_at"],
-                    "seconds": document["seconds"],
+                    "total_seconds": document["seconds"],
                     **fold,
                     **config,
                 }

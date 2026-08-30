@@ -6,6 +6,7 @@ a logistic regression or a Transformer, which is what makes the table comparable
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from statistics import fmean, stdev
@@ -28,6 +29,7 @@ class FoldScore:
     average_precision: float
     n_train: int
     n_scored: int
+    seconds: float
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,9 @@ def _score_one(
     score_fold: ScoreFold,
 ) -> FoldScore:
     """Fit, predict and measure, checking the model returned one score per row."""
+    started = time.perf_counter()
     predicted = np.asarray(score_fold(train_indices, scored_indices), dtype=np.float64)
+    seconds = time.perf_counter() - started
     actual = target[list(scored_indices)]
     if predicted.shape != actual.shape:
         raise ValueError(
@@ -118,6 +122,7 @@ def _score_one(
         average_precision=float(average_precision_score(actual, predicted)),
         n_train=len(train_indices),
         n_scored=len(scored_indices),
+        seconds=seconds,
     )
 
 
