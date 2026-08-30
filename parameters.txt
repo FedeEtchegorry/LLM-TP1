@@ -14,6 +14,7 @@ dropout            = 0.1
 positional         = learned
 pooling            = cls
 numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
 
 
 # ==============================================================================
@@ -117,3 +118,45 @@ dropout            = 0.0
 
 [H dropout 0.3]
 dropout            = 0.3
+
+# --- axis X: the feature asymmetry against the linear bar ----------------------
+# L0 gets popularity_phrase as its own one-hot column; L4 only sees it buried in
+# the title's subwords. This closes that gap and measures how much of it was that.
+[X popularity phrase]
+categorical_fields = category, storage_type, allergens, unit_of_measure, popularity_phrase
+
+# --- axis K: learning rate -------------------------------------------------------
+# 1e-4 was never swept. With Adam and a small model, a higher rate may reach a
+# different minimum -- or may not, and that null result is worth having too.
+[K lr 3e-5]
+learning_rate      = 3e-5
+
+[K lr 3e-4]
+learning_rate      = 3e-4
+
+[K lr 1e-3]
+learning_rate      = 1e-3
+
+[K lr 3e-3]
+learning_rate      = 3e-3
+
+# --- axis Y: joint capacity, not a single knob ----------------------------------
+# The model is 140k parameters over ~830 positives per fold. Each point here
+# changes width and depth together, on purpose: it is one hypothesis (the model
+# is oversized), not two separate sweeps that would each measure something else.
+[Y d_model 16, 1 capa]
+d_model            = 16
+n_layers           = 1
+
+[Y d_model 32, 1 capa]
+d_model            = 32
+n_layers           = 1
+
+[Y d_model 32, 2 capas]
+d_model            = 32
+
+# --- axis Z: heavier regularisation ---------------------------------------------
+# Axis H already tried 0.0 and 0.3; the gap at the best epoch (0.06-0.13 on the
+# L4 folds) is real enough to also try further out.
+[Z dropout 0.5]
+dropout            = 0.5

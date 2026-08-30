@@ -95,7 +95,7 @@ def train_fold(
     model = BtrTransformer(encoder, config, TRAINING.n_buckets).to(device)
     optimiser = torch.optim.AdamW(
         model.parameters(),
-        lr=TRAINING.learning_rate,
+        lr=config.learning_rate,
         weight_decay=TRAINING.weight_decay,
     )
     loss_of = nn.BCEWithLogitsLoss()

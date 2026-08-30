@@ -36,8 +36,10 @@ POOLINGS = ("cls", "mean", "attention")
 LADDER_NAME = re.compile(r"^L\d")
 """``[L0 ...]`` through ``[L4 ...]``: the rungs ``run_ladder`` walks, in file order."""
 
-AXIS_NAME = re.compile(r"^[A-H] ")
-"""``[B 1 layer]``, ``[C 8 heads]``, ...: the alternatives ``run_modules`` sweeps."""
+AXIS_NAME = re.compile(r"^(?!T )[A-Z] ")
+"""``[B 1 layer]``, ``[C 8 heads]``, ``[K lr 3e-4]``, ...: the alternatives
+``run_modules`` sweeps. Any capital letter and a space -- except ``T``, which
+``TRANSFER_NAME`` owns, so ``[T frozen text]`` never counts as an axis point."""
 
 TRANSFER_NAME = re.compile(r"^T ")
 """``[T frozen text]``, ``[T finetuned]``, ...: what ``run_transfer`` walks."""
@@ -57,7 +59,6 @@ class Training:
     max_text_tokens: int = 64
     epochs: int = 60
     batch_size: int = 64
-    learning_rate: float = 1e-4
     weight_decay: float = 0.01
     patience: int = 10
     seed: int = 1337
@@ -123,18 +124,32 @@ class RunConfig:
     positional: str
     pooling: str
     numeric_embedding: str
+    learning_rate: float = 1e-4
+    """Was a ``Training`` constant; now a per-run knob so axis K can sweep it. Kept
+    out of the ``sorted(asdict(self))`` bucket in ``digest`` below, so the field
+    moving here does not, by itself, move any existing run's digest."""
 
     @property
     def digest(self) -> str:
         """Stable across processes, and sensitive to the constants above.
 
+        ``learning_rate`` is hashed alongside the other training constants, not
+        alongside the rest of this run's own fields: it used to live on ``Training``,
+        and grouping it there keeps every digest computed before it moved byte-for-
+        byte identical to the one computed after -- the field's home changed, not the
+        value a fixed run carries.
+
         ``TRANSFER`` enters only for the two pretrained regimes: changing the
         fine-tuning budget should not invalidate a Transformer trained from scratch,
         which never read it.
         """
+        config_fields = {
+            key: value for key, value in asdict(self).items() if key != "learning_rate"
+        }
+        training_fields = {**asdict(TRAINING), "learning_rate": self.learning_rate}
         payload = [
-            sorted(asdict(self).items()),
-            sorted(asdict(TRAINING).items()),
+            sorted(config_fields.items()),
+            sorted(training_fields.items()),
             (
                 PROTOCOL.dataset,
                 PROTOCOL.folds,
@@ -199,6 +214,7 @@ def _run(name: str, section) -> RunConfig:
             positional=section.get("positional"),
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
+            learning_rate=section.getfloat("learning_rate"),
         )
     except (TypeError, ValueError) as error:
         raise ParameterError(f"[{name}] is malformed: {error}") from error
