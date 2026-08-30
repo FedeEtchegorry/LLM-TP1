@@ -9,9 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
+from src.model.style import (  # sets the Agg backend before pyplot is imported below
+    BAR_COLOR,
+    HIGHLIGHT,
+    MODEL_COLOR,
+    NEUTRAL,
+    OBSERVED_COLOR,
+    PALETTE,
+)
+from src.model.style import save as _save
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
@@ -20,22 +26,6 @@ import pandas as pd  # noqa: E402
 FIGURES_DIR = Path("figures")
 FIGSIZE = (10, 6)
 WIDE = (12, 5)
-DPI = 120
-
-MODEL_COLOR = "#4C72B0"
-BAR_COLOR = "#C44E52"
-OBSERVED_COLOR = "#55A868"
-NEUTRAL = "#B0B0B0"
-HIGHLIGHT = "#8172B2"
-
-PALETTE = (MODEL_COLOR, BAR_COLOR, OBSERVED_COLOR, HIGHLIGHT, "#CCB974", "#64B5CD")
-
-
-def _save(figure: plt.Figure, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=DPI, bbox_inches="tight")
-    plt.close(figure)
-    return path
 
 
 # ---------------------------------------------------------------------------
