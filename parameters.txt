@@ -56,6 +56,21 @@ numeric_embedding  = affine
 # Module alternatives, one run per point, all measured against L4.
 # ==============================================================================
 
+# --- axis A: how a number becomes a vector -------------------------------------
+# L3 and L4 already carry affine and affine+buckets; these four complete the axis.
+# piecewise costs the same table as buckets, so the pair isolates the ordering.
+[A no numeric reading]
+numeric_embedding  = none
+
+[A buckets only]
+numeric_embedding  = buckets
+
+[A piecewise-linear]
+numeric_embedding  = piecewise
+
+[A periodic]
+numeric_embedding  = periodic
+
 # --- axis B: depth -------------------------------------------------------------
 [B 1 layer]
 n_layers           = 1

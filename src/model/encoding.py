@@ -71,6 +71,7 @@ class EncodedRows:
     numeric_values: torch.Tensor
     numeric_buckets: torch.Tensor
     numeric_missing: torch.Tensor
+    numeric_ratios: torch.Tensor
 
     def __len__(self) -> int:
         return int(self.token_ids.shape[0])
@@ -84,6 +85,7 @@ class EncodedRows:
             numeric_values=self.numeric_values.to(device),
             numeric_buckets=self.numeric_buckets.to(device),
             numeric_missing=self.numeric_missing.to(device),
+            numeric_ratios=self.numeric_ratios.to(device),
         )
 
     def select(self, rows: torch.Tensor) -> "EncodedRows":
@@ -95,6 +97,7 @@ class EncodedRows:
             numeric_values=self.numeric_values[rows],
             numeric_buckets=self.numeric_buckets[rows],
             numeric_missing=self.numeric_missing[rows],
+            numeric_ratios=self.numeric_ratios[rows],
         )
 
 
@@ -109,6 +112,7 @@ class RowEncoder:
     _centres: dict[str, float] = field(default_factory=dict, init=False)
     _scales: dict[str, float] = field(default_factory=dict, init=False)
     _edges: dict[str, np.ndarray] = field(default_factory=dict, init=False)
+    _bounds: dict[str, np.ndarray] = field(default_factory=dict, init=False)
     _text_width: int = field(default=0, init=False)
     _fitted: bool = field(default=False, init=False)
 
@@ -125,7 +129,7 @@ class RowEncoder:
             raise RuntimeError("the encoder was never fitted")
         rows = frame.iloc[list(indices)]
         token_ids, field_ids, mask = self._discrete(rows)
-        values, buckets, missing = self._numeric(rows)
+        values, buckets, missing, ratios = self._numeric(rows)
         return EncodedRows(
             token_ids=torch.from_numpy(token_ids),
             field_ids=torch.from_numpy(field_ids),
@@ -133,6 +137,7 @@ class RowEncoder:
             numeric_values=torch.from_numpy(values),
             numeric_buckets=torch.from_numpy(buckets),
             numeric_missing=torch.from_numpy(missing),
+            numeric_ratios=torch.from_numpy(ratios),
         )
 
     @property
@@ -192,7 +197,7 @@ class RowEncoder:
             offset += len(levels) + 1
 
     def _fit_numbers(self, training: pd.DataFrame) -> None:
-        self._centres, self._scales, self._edges = {}, {}, {}
+        self._centres, self._scales, self._edges, self._bounds = {}, {}, {}, {}
         for name in self.spec.numeric_fields:
             values = numeric_column(training, name)
             present = values[~np.isnan(values)]
@@ -201,8 +206,17 @@ class RowEncoder:
             self._centres[name] = centre
             self._scales[name] = spread or 1.0
             filled = np.where(np.isnan(values), centre, values)
-            quantiles = np.linspace(0.0, 1.0, self.spec.n_buckets + 1)[1:-1]
-            self._edges[name] = np.unique(np.quantile(filled, quantiles))
+            quantiles = np.linspace(0.0, 1.0, self.spec.n_buckets + 1)
+            self._edges[name] = np.unique(np.quantile(filled, quantiles[1:-1]))
+            self._bounds[name] = self._interval_bounds(filled, quantiles)
+
+    def _interval_bounds(self, filled: np.ndarray, quantiles: np.ndarray) -> np.ndarray:
+        cuts = np.quantile(filled, quantiles)
+        wanted = self.spec.n_buckets + 1
+        for position in range(1, wanted):
+            if cuts[position] <= cuts[position - 1]:
+                cuts[position] = np.nextafter(cuts[position - 1], np.inf)
+        return cuts
 
     def _discrete(
         self, rows: pd.DataFrame
@@ -241,12 +255,16 @@ class RowEncoder:
 
         return token_ids, field_ids, mask
 
-    def _numeric(self, rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _numeric(
+        self, rows: pd.DataFrame
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Standardised value, bucket index and the flag, one column per field."""
         n_rows, n_fields = len(rows), self.n_numeric
+        n_buckets = self.spec.n_buckets
         values = np.zeros((n_rows, n_fields), dtype=np.float32)
         buckets = np.zeros((n_rows, n_fields), dtype=np.int64)
         missing = np.zeros((n_rows, n_fields), dtype=np.float32)
+        ratios = np.zeros((n_rows, n_fields, n_buckets), dtype=np.float32)
 
         for column, name in enumerate(self.spec.numeric_fields):
             raw = numeric_column(rows, name)
@@ -255,8 +273,17 @@ class RowEncoder:
             values[:, column] = (filled - self._centres[name]) / self._scales[name]
             buckets[:, column] = np.digitize(filled, self._edges[name])
             missing[:, column] = absent.astype(np.float32)
+            ratios[:, column, :] = self.piecewise_ratios(name, filled)
 
-        return values, buckets, missing
+        return values, buckets, missing, ratios
+
+    def piecewise_ratios(self, name: str, values: np.ndarray) -> np.ndarray:
+        """``(rows, n_buckets)``: how far the value travelled through each bucket."""
+        bounds = self._bounds[name]
+        lower, upper = bounds[:-1], bounds[1:]
+        width = np.where(upper > lower, upper - lower, 1.0)
+        travelled = (np.asarray(values, dtype=np.float64)[:, None] - lower[None, :])
+        return np.clip(travelled / width[None, :], 0.0, 1.0).astype(np.float32)
 
 
 def categorical_column(frame: pd.DataFrame, name: str) -> pd.Series:

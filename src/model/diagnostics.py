@@ -323,6 +323,8 @@ def price_bucket_recovery(
     monotone price effect produces a line here; ``docs/EDA.md`` says the truth is a
     hump.
     """
+    import torch
+
     from src.model.training import predict
 
     if column not in encoder.spec.numeric_fields:
@@ -348,11 +350,15 @@ def price_bucket_recovery(
             encoded,
             numeric_values=encoded.numeric_values.clone(),
             numeric_buckets=encoded.numeric_buckets.clone(),
+            numeric_ratios=encoded.numeric_ratios.clone(),
         )
         counterfactual.numeric_buckets[:, position] = bucket
         counterfactual.numeric_values[:, position] = float(
             encoder.standardise(column, np.array([centre]))[0]
         )
+        counterfactual.numeric_ratios[:, position, :] = torch.from_numpy(
+            encoder.piecewise_ratios(column, np.array([centre]))[0]
+        ).to(encoded.numeric_ratios.device)
         records.append(
             {
                 "bucket": bucket,
