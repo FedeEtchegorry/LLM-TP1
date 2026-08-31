@@ -16,6 +16,7 @@ import re
 from configparser import ConfigParser
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
+from typing import ClassVar
 
 PARAMETERS_PATH = Path("parameters.txt")
 
@@ -61,7 +62,6 @@ class Training:
     batch_size: int = 64
     weight_decay: float = 0.01
     patience: int = 10
-    seed: int = 1337
     regularisation: float = 1.0
 
 
@@ -128,25 +128,36 @@ class RunConfig:
     """Was a ``Training`` constant; now a per-run knob so axis K can sweep it. Kept
     out of the ``sorted(asdict(self))`` bucket in ``digest`` below, so the field
     moving here does not, by itself, move any existing run's digest."""
+    seed: int = 1337
+    """Was also a ``Training`` constant, for the same reason and with the same
+    digest treatment: a fold used to be confounded with its initialisation --
+    ``seed=TRAINING.seed + fold_index`` -- with no way to repeat one fold under a
+    different draw. Now a run can fix ``seed`` and vary nothing else."""
+
+    _DIGEST_TRAINING_FIELDS: ClassVar[tuple[str, ...]] = ("learning_rate", "seed")
+    """Fields that moved here from ``Training``. Grouped with the rest of
+    ``Training`` in ``digest``, not with this run's own fields, so every digest
+    computed before either field moved is byte-for-byte identical to the one
+    computed after -- the field's home changed, not the value a fixed run carries.
+    """
 
     @property
     def digest(self) -> str:
         """Stable across processes, and sensitive to the constants above.
-
-        ``learning_rate`` is hashed alongside the other training constants, not
-        alongside the rest of this run's own fields: it used to live on ``Training``,
-        and grouping it there keeps every digest computed before it moved byte-for-
-        byte identical to the one computed after -- the field's home changed, not the
-        value a fixed run carries.
 
         ``TRANSFER`` enters only for the two pretrained regimes: changing the
         fine-tuning budget should not invalidate a Transformer trained from scratch,
         which never read it.
         """
         config_fields = {
-            key: value for key, value in asdict(self).items() if key != "learning_rate"
+            key: value
+            for key, value in asdict(self).items()
+            if key not in self._DIGEST_TRAINING_FIELDS
         }
-        training_fields = {**asdict(TRAINING), "learning_rate": self.learning_rate}
+        training_fields = {
+            **asdict(TRAINING),
+            **{key: getattr(self, key) for key in self._DIGEST_TRAINING_FIELDS},
+        }
         payload = [
             sorted(config_fields.items()),
             sorted(training_fields.items()),
@@ -215,6 +226,7 @@ def _run(name: str, section) -> RunConfig:
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
             learning_rate=section.getfloat("learning_rate"),
+            seed=section.getint("seed"),
         )
     except (TypeError, ValueError) as error:
         raise ParameterError(f"[{name}] is malformed: {error}") from error

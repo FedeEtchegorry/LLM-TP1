@@ -18,11 +18,20 @@ import numpy as np
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import PARAMETERS_PATH, PROTOCOL, RunConfig, load_parameters
+from src.model.configs import (
+    PARAMETERS_PATH,
+    PROTOCOL,
+    TRAINING,
+    RunConfig,
+    axis_runs,
+    ladder_runs,
+    load_parameters,
+)
 from src.model.diagnostics import (
     Scored,
     calibration,
     calibration_error,
+    cls_attention,
     errors_by_level,
     pr_points,
     ranking_gains,
@@ -30,11 +39,38 @@ from src.model.diagnostics import (
 )
 from src.model import figures as fig
 from src.model.experiment import partition
-from src.model.results import RESULTS_DIR, load, load_predictions, summary_frame
-from src.model.run_final import explainable, interpretability
+from src.model.results import (
+    RESULTS_DIR,
+    fold_frame,
+    load,
+    load_predictions,
+    summary_frame,
+)
+from src.model.run_final import explainable, interpretability, rebuild
 
 BAR = "L0"
 ERROR_COLUMN = "popularity_phrase"
+TEXT_ATTENTION_CONFIG = "L2 text with attention"
+"""Text-only, no tabular fields: the config where "where does [CLS] look" is a
+question about text tokens. The final winner's own attention slide (drawn by
+run_final, 09-final-atencion-cls) answers a different question -- where the deployed
+model's attention actually goes, tabular fields included, which is why it shows most
+of the mass on popularity_phrase rather than on words."""
+ABLATION_BASE = "L4 tabular, numbers affine and bucketed"
+ABLATION_MULTI_KNOB_PREFIXES = ("Y ", "K ", "V ", "S ")
+"""Same exemption as ``test_every_axis_point_changes_exactly_one_thing_from_the_base``:
+these axes build on more than one prior knob, so a paired delta against L4 alone would
+not isolate what they measure."""
+ABLATION_MULTI_KNOB_NAMES = frozenset({"G tabular con popularity"})
+LEARNING_RATE_SWEEP_NAMES = (
+    "K lr 3e-5",
+    "V d_model 32, 1 capa",  # the 1e-4 point; not repeated as a "K" run
+    "K lr 3e-4",
+    "K lr 1e-3",
+    "K lr 3e-3",
+)
+SEED_VARIANCE_SEED_RUNS = ("K lr 3e-4", "S ganadora seed 7", "S ganadora seed 99")
+SEED_VARIANCE_CONFIG_RUNS = ("V sin dropout", "K lr 3e-4", "V d_model 32, 1 capa")
 
 INTERPRETABILITY_FIGURES = (
     "09-final-curvas-entrenamiento",
@@ -195,6 +231,138 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             interpretability(explained, frame, figures_dir)
+
+    if wanted("07-escalera-cascada", args.only):
+        ladder_names = ladder_runs(declared)
+        ladder_summary = summary_frame(results_dir)
+        rows = ladder_summary[ladder_summary["name"].isin(ladder_names)]
+        missing_rungs = sorted(set(ladder_names) - set(rows["name"]))
+        if missing_rungs:
+            report_missing("07-escalera-cascada", [f"faltan los peldaños: {missing_rungs}"])
+        else:
+            path = fig.ladder_waterfall(
+                rows,
+                title="La escalera: L0 a L4, con el AP de la barra lineal marcado",
+                path=figures_dir / "07-escalera-cascada.png",
+            )
+            report("07-escalera-cascada", path)
+
+    if wanted("07-ablacion-bosque", args.only):
+        variant_names = [
+            name
+            for name in axis_runs(declared)
+            if not name.startswith(ABLATION_MULTI_KNOB_PREFIXES)
+            and name not in ABLATION_MULTI_KNOB_NAMES
+        ]
+        if ABLATION_BASE not in declared:
+            report_missing("07-ablacion-bosque", [f"no está declarada la base {ABLATION_BASE!r}"])
+        else:
+            folds = fold_frame(results_dir)
+            recorded_names = set(folds["name"]) if not folds.empty else set()
+            if ABLATION_BASE not in recorded_names:
+                report_missing(
+                    "07-ablacion-bosque",
+                    [f"falta la corrida de la base {ABLATION_BASE!r} (correr run_ladder)"],
+                )
+            else:
+                recorded_variants = [name for name in variant_names if name in recorded_names]
+                not_yet_run = sorted(set(variant_names) - set(recorded_variants))
+                if not_yet_run:
+                    print(f"  [07-ablacion-bosque] sin registrar todavia: {not_yet_run}")
+                if not recorded_variants:
+                    report_missing(
+                        "07-ablacion-bosque",
+                        ["ninguna variante de la ablacion esta registrada todavia"],
+                    )
+                else:
+                    path = fig.ablation_forest(
+                        folds,
+                        ABLATION_BASE,
+                        recorded_variants,
+                        title=f"Deltas pareados de AP contra [{ABLATION_BASE}] (IC 95%, 5 folds)",
+                        path=figures_dir / "07-ablacion-bosque.png",
+                    )
+                    report("07-ablacion-bosque", path)
+
+    if wanted("07-tasa-aprendizaje", args.only):
+        undeclared = [name for name in LEARNING_RATE_SWEEP_NAMES if name not in declared]
+        if undeclared:
+            report_missing("07-tasa-aprendizaje", [f"no declaradas en parameters.txt: {undeclared}"])
+        else:
+            folds = fold_frame(results_dir)
+            recorded_names = set(folds["name"]) if not folds.empty else set()
+            present = [name for name in LEARNING_RATE_SWEEP_NAMES if name in recorded_names]
+            missing = sorted(set(LEARNING_RATE_SWEEP_NAMES) - set(present))
+            if missing:
+                print(f"  [07-tasa-aprendizaje] sin registrar todavia: {missing}")
+            if not present:
+                report_missing("07-tasa-aprendizaje", ["ningun punto del barrido esta registrado"])
+            else:
+                path = fig.learning_rate_sweep(
+                    folds,
+                    present,
+                    epoch_ceiling=TRAINING.epochs,
+                    title="Barrido de learning rate: AP y best_epoch por fold",
+                    path=figures_dir / "07-tasa-aprendizaje.png",
+                )
+                report("07-tasa-aprendizaje", path)
+
+    if wanted("07-varianza-semilla", args.only):
+        wanted_names = set(SEED_VARIANCE_SEED_RUNS) | set(SEED_VARIANCE_CONFIG_RUNS)
+        undeclared = sorted(name for name in wanted_names if name not in declared)
+        if undeclared:
+            report_missing("07-varianza-semilla", [f"no declaradas en parameters.txt: {undeclared}"])
+        else:
+            seed_summary = summary_frame(results_dir)
+            recorded_names = set(seed_summary["name"]) if not seed_summary.empty else set()
+            missing = sorted(wanted_names - recorded_names)
+            if missing:
+                report_missing("07-varianza-semilla", [f"sin registrar: {missing}"])
+            else:
+                path = fig.seed_variance(
+                    seed_summary,
+                    list(SEED_VARIANCE_SEED_RUNS),
+                    list(SEED_VARIANCE_CONFIG_RUNS),
+                    seed_row_label="K lr 3e-4 (semillas 1337 / 7 / 99)",
+                    config_row_label="V sin dropout / K lr 3e-4 / V d_model 32, 1 capa",
+                    title="Varianza por semilla contra varianza entre configuraciones",
+                    path=figures_dir / "07-varianza-semilla.png",
+                )
+                report("07-varianza-semilla", path)
+
+    if wanted("07-atencion-l2-texto", args.only):
+        if TEXT_ATTENTION_CONFIG not in declared:
+            report_missing(
+                "07-atencion-l2-texto", [f"no declarada en parameters.txt: {TEXT_ATTENTION_CONFIG!r}"]
+            )
+        else:
+            text_config = declared[TEXT_ATTENTION_CONFIG]
+            fold0 = partitions.folds[0]
+            model, encoder = rebuild(
+                text_config, frame, fold0.train_indices, 0, results_dir
+            )
+            if model is None:
+                report_missing(
+                    "07-atencion-l2-texto",
+                    [f"faltan los pesos guardados del fold 0 de {TEXT_ATTENTION_CONFIG!r} "
+                     "(correr run_ladder con save_weights)"],
+                )
+            else:
+                attention = cls_attention(model, encoder, frame, fold0.validation_indices)
+                if attention.empty:
+                    report_missing(
+                        "07-atencion-l2-texto", [f"{TEXT_ATTENTION_CONFIG!r} no tiene bloques de atencion"]
+                    )
+                else:
+                    path = fig.attention_by_group(
+                        attention,
+                        title=(
+                            f"Atencion del [CLS] sobre texto puro ([{TEXT_ATTENTION_CONFIG}], "
+                            "validacion del fold 0)"
+                        ),
+                        path=figures_dir / "07-atencion-l2-texto.png",
+                    )
+                    report("07-atencion-l2-texto", path)
 
     if wanted("08-transfer-similitud-frases", args.only):
         from src.model.pretrained import CONTRAST, contrast_row, phrase_similarity

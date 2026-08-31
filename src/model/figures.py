@@ -7,6 +7,7 @@ because these end up on the slides while the code and the docs stay in English.
 
 from __future__ import annotations
 
+from math import sqrt
 from pathlib import Path
 
 from src.model.style import (  # sets the Agg backend before pyplot is imported below
@@ -27,6 +28,10 @@ FIGURES_DIR = Path("figures")
 FIGSIZE = (10, 6)
 WIDE = (12, 5)
 
+T95_DF4 = 2.776
+"""Two-sided 95% critical value of Student's t at 4 degrees of freedom: this protocol
+always produces 5 paired folds, too few to lean on the normal approximation instead."""
+
 
 # ---------------------------------------------------------------------------
 # Stage 4: what the frozen encoder thinks the popularity phrases mean.
@@ -46,6 +51,12 @@ def similarity_against_gap(
     If semantics carried the signal the cloud would slope down -- similar wording,
     similar buy rate. The pair that matters is marked, and it sits where the claim
     fails: nearly identical text, a 62-point gap in BTR.
+
+    The x-axis label already says which encoder; a caption under the axes spells out,
+    in words a slide-reader cannot skim past, that this is MiniLM's own frozen
+    embedding space and nothing our Transformer learned -- and not a claim about the
+    task in general, since a supervised model reading the same phrases through its own
+    trained weights would not be bound to reproduce this geometry.
     """
     figure, axes = plt.subplots(figsize=FIGSIZE)
     axes.scatter(
@@ -83,6 +94,13 @@ def similarity_against_gap(
     axes.set_title(title)
     axes.grid(alpha=0.25, zorder=0)
     axes.legend(loc="upper left", fontsize=9)
+    figure.text(
+        0.5, 0.01,
+        "Mide el espacio de embeddings de MiniLM congelado -- no el modelo "
+        "entrenado en este trabajo, ni una afirmacion sobre la tarea en general.",
+        ha="center", fontsize=8.5, color=NEUTRAL,
+    )
+    figure.tight_layout(rect=(0, 0.05, 1, 1))
     return _save(figure, path)
 
 
@@ -315,6 +333,359 @@ def errors_by_level(
     axes.set_title(title)
     axes.grid(alpha=0.25, axis="x")
     axes.legend(loc="lower right", fontsize=9)
+    return _save(figure, path)
+
+
+def ladder_waterfall(ladder: pd.DataFrame, *, title: str, path: Path) -> Path:
+    """Horizontal bars for the ladder, L0 through L4, sorted by rung regardless of the
+    frame's own row order. Each bar carries its between-fold error bar and, beside it,
+    the delta against the rung before it; a dashed line at L0's own AP runs through the
+    whole plot, so a rung that never clears the linear bar is visible without reading
+    the axis. This is also where L1 and L2 read as indistinguishable despite L2 costing
+    100k more parameters -- their bars and error bars overlap almost exactly.
+
+    ``ladder`` is ``results.summary_frame()`` filtered to the five ``[L0 ...]``..
+    ``[L4 ...]`` rows -- one per rung, carrying ``name``, ``average_precision_mean`` and
+    ``average_precision_std``.
+    """
+    rows = ladder.assign(rung=ladder["name"].str.extract(r"^L(\d)")[0].astype(int))
+    rows = rows.sort_values("rung").reset_index(drop=True)
+    l0_ap = float(rows.loc[rows["rung"] == 0, "average_precision_mean"].iloc[0])
+
+    figure, axes = plt.subplots(figsize=FIGSIZE)
+    positions = np.arange(len(rows))
+
+    axes.barh(
+        positions,
+        rows["average_precision_mean"],
+        xerr=rows["average_precision_std"],
+        color=BAR_COLOR,
+        ecolor="black",
+        capsize=4,
+        height=0.6,
+        zorder=2,
+    )
+    axes.axvline(
+        l0_ap,
+        color=NEUTRAL,
+        linewidth=2,
+        linestyle="--",
+        zorder=1,
+        label=f"L0 (AP {l0_ap:.3f})",
+    )
+
+    previous = None
+    for y, (_, row) in zip(positions, rows.iterrows()):
+        label = f"AP {row['average_precision_mean']:.3f}"
+        if previous is not None:
+            label += f"   Δ {row['average_precision_mean'] - previous:+.3f}"
+        previous = row["average_precision_mean"]
+        axes.text(
+            row["average_precision_mean"] + row["average_precision_std"] + 0.012,
+            y,
+            label,
+            va="center",
+            fontsize=9,
+        )
+
+    axes.set_yticks(positions)
+    axes.set_yticklabels(rows["name"], fontsize=9)
+    axes.invert_yaxis()
+    axes.set_xlabel("Average precision (media entre folds)")
+    axes.set_title(title)
+    axes.grid(alpha=0.25, axis="x")
+    axes.legend(loc="lower right", fontsize=9)
+    return _save(figure, path)
+
+
+def ablation_forest(
+    folds: pd.DataFrame,
+    base_name: str,
+    variant_names: list[str],
+    *,
+    title: str,
+    path: Path,
+) -> Path:
+    """Forest plot of paired per-fold AP deltas against ``base_name``.
+
+    ``folds`` is ``results.fold_frame()`` (or a slice of it), carrying ``name``,
+    ``fold_index`` and ``average_precision``. The pairing is the whole point: for each
+    variant, ``delta_k = AP_variant(fold k) - AP_base(fold k)`` is computed fold by fold
+    and only then averaged, so subtracting cancels the fold's own difficulty instead of
+    comparing two loose means. The interval is Student's t at 4 degrees of freedom
+    (``T95_DF4``), not the normal approximation -- there are only 5 paired folds. A
+    variant missing one of the base's folds is left out of the plot, with a warning
+    printed, rather than imputed.
+    """
+    base = folds[folds["name"] == base_name].set_index("fold_index")["average_precision"]
+    if base.empty:
+        raise ValueError(f"no hay folds registrados para la base {base_name!r}")
+
+    labels: list[str] = []
+    deltas_by_variant: list[np.ndarray] = []
+    skipped: list[str] = []
+    for variant in variant_names:
+        scored = folds[folds["name"] == variant].set_index("fold_index")["average_precision"]
+        missing = sorted(set(base.index) - set(scored.index))
+        if missing:
+            print(f"[ablation_forest] {variant!r}: faltan los folds {missing}, se excluye")
+            skipped.append(variant)
+            continue
+        labels.append(variant)
+        deltas_by_variant.append((scored.loc[base.index] - base).to_numpy())
+
+    if not labels:
+        raise ValueError("ninguna variante tiene todos los folds de la base pareados")
+
+    figure, axes = plt.subplots(figsize=(10, max(4, 0.6 * len(labels) + 1)))
+    positions = np.arange(len(labels))
+
+    for y, deltas in zip(positions, deltas_by_variant):
+        mean = float(deltas.mean())
+        halfwidth = T95_DF4 * float(deltas.std(ddof=1)) / sqrt(len(deltas))
+        crosses_zero = mean - halfwidth <= 0 <= mean + halfwidth
+        colour = NEUTRAL if crosses_zero else HIGHLIGHT
+        axes.errorbar(
+            [mean],
+            [y],
+            xerr=[[halfwidth], [halfwidth]],
+            fmt="o",
+            color=colour,
+            ecolor=colour,
+            elinewidth=1.8,
+            capsize=4,
+            markersize=8,
+            zorder=3,
+        )
+        axes.text(
+            mean + halfwidth + 0.006,
+            y,
+            f"{mean:+.3f}  [{mean - halfwidth:+.3f}, {mean + halfwidth:+.3f}]",
+            va="center",
+            fontsize=8,
+            color=colour,
+        )
+
+    axes.axvline(0.0, color="#333333", linewidth=2.5, zorder=1)
+    axes.set_yticks(positions)
+    axes.set_yticklabels(labels, fontsize=9)
+    axes.invert_yaxis()
+    axes.set_xlabel(f"Δ AP pareado vs [{base_name}] (IC 95%, t de Student, 4 g.l.)")
+    axes.set_title(title)
+    axes.grid(alpha=0.25, axis="x")
+    if skipped:
+        axes.text(
+            0.0,
+            -0.14,
+            "excluidas por folds faltantes: " + ", ".join(skipped),
+            transform=axes.transAxes,
+            fontsize=8,
+            color=NEUTRAL,
+        )
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def learning_rate_sweep(
+    folds: pd.DataFrame,
+    names: list[str],
+    *,
+    epoch_ceiling: int,
+    title: str,
+    path: Path,
+) -> Path:
+    """Two panels sharing a log x-axis of learning rate: validation AP on top, mean
+    ``best_epoch`` on the bottom, with a dashed line at ``epoch_ceiling``.
+
+    ``folds`` is ``results.fold_frame()`` (or a slice of it); ``names`` are the runs
+    that make up the sweep, one learning rate each, read from each run's own
+    ``config.learning_rate`` rather than assumed from ``names`` order. A point where
+    at least one fold's ``best_epoch`` reaches ``epoch_ceiling`` is annotated on the
+    bottom panel: early stopping never cut that fold off, so its plateau is a
+    training-budget artefact, not evidence the rate itself is fine. Checked per fold
+    rather than on the mean, since a couple of folds pinned at the ceiling can still
+    average below it.
+    """
+    points = []
+    for name in names:
+        rows = folds[folds["name"] == name]
+        if rows.empty:
+            print(f"[learning_rate_sweep] {name!r}: sin folds registrados, se excluye")
+            continue
+        average_precision = rows["average_precision"].astype(float)
+        best_epoch = rows["best_epoch"].dropna().astype(float)
+        points.append(
+            {
+                "name": name,
+                "learning_rate": float(rows["config.learning_rate"].iloc[0]),
+                "ap_mean": float(average_precision.mean()),
+                "ap_std": float(average_precision.std(ddof=1)) if len(average_precision) > 1 else 0.0,
+                "best_epoch_mean": float(best_epoch.mean()) if not best_epoch.empty else float("nan"),
+                "hit_ceiling": bool((best_epoch >= epoch_ceiling).any()),
+            }
+        )
+    if not points:
+        raise ValueError("ninguno de los puntos del barrido tiene folds registrados")
+
+    table = pd.DataFrame(points).sort_values("learning_rate").reset_index(drop=True)
+
+    figure, (top, bottom) = plt.subplots(
+        2, 1, figsize=(9, 8), sharex=True, gridspec_kw={"height_ratios": [2, 1]}
+    )
+
+    top.plot(table["learning_rate"], table["ap_mean"], "o-", color=MODEL_COLOR, linewidth=2, zorder=3)
+    top.fill_between(
+        table["learning_rate"],
+        table["ap_mean"] - table["ap_std"],
+        table["ap_mean"] + table["ap_std"],
+        color=MODEL_COLOR,
+        alpha=0.2,
+        zorder=2,
+        label="± 1 desvio entre folds",
+    )
+    for _, row in table.iterrows():
+        top.annotate(
+            f"{row['ap_mean']:.3f} ± {row['ap_std']:.3f}",
+            xy=(row["learning_rate"], row["ap_mean"]),
+            xytext=(0, 9),
+            textcoords="offset points",
+            ha="center",
+            fontsize=8,
+        )
+    top.set_ylabel("AP de validacion (media entre folds)")
+    top.set_xscale("log")
+    top.grid(alpha=0.25)
+    top.legend(loc="best", fontsize=8)
+    plt.setp(top.get_xticklabels(), visible=False)
+
+    bottom.plot(
+        table["learning_rate"], table["best_epoch_mean"], "o-",
+        color=BAR_COLOR, linewidth=2, zorder=3,
+    )
+    bottom.axhline(
+        epoch_ceiling,
+        color=NEUTRAL,
+        linestyle="--",
+        linewidth=1.5,
+        zorder=1,
+        label=f"techo de epocas ({epoch_ceiling})",
+    )
+    for _, row in table[table["hit_ceiling"]].iterrows():
+        bottom.annotate(
+            "toca el techo:\nel early stopping\nnunca cortó en algun fold",
+            xy=(row["learning_rate"], row["best_epoch_mean"]),
+            xytext=(60, 48),
+            textcoords="offset points",
+            ha="left",
+            fontsize=8,
+            color=BAR_COLOR,
+            arrowprops=dict(arrowstyle="->", color=BAR_COLOR, linewidth=1.2),
+        )
+    bottom.set_xscale("log")
+    bottom.set_xticks(table["learning_rate"])
+    bottom.set_xticklabels([f"{rate:g}" for rate in table["learning_rate"]])
+    bottom.set_xlabel("Learning rate (escala log)")
+    bottom.set_ylabel("best_epoch (media entre folds)")
+    bottom.set_ylim(0, epoch_ceiling * 1.28)
+    bottom.grid(alpha=0.25)
+    bottom.legend(loc="lower left", fontsize=8)
+
+    figure.suptitle(title)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def seed_variance(
+    summary: pd.DataFrame,
+    seed_runs: list[str],
+    config_runs: list[str],
+    *,
+    seed_row_label: str,
+    config_row_label: str,
+    title: str,
+    path: Path,
+) -> Path:
+    """Two rows of AP points and the range across them: one configuration under
+    several seeds on top, several different configurations (each at its own default
+    seed) on the bottom. The point is the comparison between the two ranges, not
+    either row alone -- when the between-seed range is as wide as, or wider than, the
+    between-config range, picking among the configurations has no empirical support.
+
+    ``summary`` is ``results.summary_frame()``; ``seed_runs`` and ``config_runs`` are
+    the run names for each row, read by ``average_precision_mean``. A row whose points
+    are numerically identical (``max == min``, e.g. a deterministic model like the
+    logistic bar scored under different seeds) gets no range bracket -- a zero-width
+    bar would read as a measured spread of zero rather than the absence of one -- and
+    is labelled "(determinístico)" instead.
+    """
+
+    def _values(names: list[str]) -> list[float]:
+        values, missing = [], []
+        for name in names:
+            match = summary[summary["name"] == name]
+            if match.empty:
+                missing.append(name)
+                continue
+            values.append(float(match["average_precision_mean"].iloc[0]))
+        if missing:
+            print(f"[seed_variance] sin registrar: {missing}")
+        return values
+
+    seed_values = _values(seed_runs)
+    config_values = _values(config_runs)
+    if not seed_values or not config_values:
+        raise ValueError("faltan corridas registradas para armar seed_variance")
+
+    figure, axes = plt.subplots(figsize=(9, 4.2))
+    rows = ((1, seed_row_label, seed_values), (0, config_row_label, config_values))
+    spans: dict[str, float] = {}
+
+    for y, label, values in rows:
+        jitter = np.linspace(-0.08, 0.08, len(values)) if len(values) > 1 else [0.0]
+        axes.scatter(
+            values,
+            [y + offset for offset in jitter],
+            s=90,
+            color=MODEL_COLOR,
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+        )
+        low, high = min(values), max(values)
+        span = high - low
+        spans[label] = span
+        if span < 1e-6:
+            axes.text(
+                low, y - 0.24, "(determinístico: mismo AP en las 3 semillas)",
+                ha="center", fontsize=8, color=NEUTRAL,
+            )
+        else:
+            axes.plot([low, high], [y - 0.16, y - 0.16], color=BAR_COLOR, linewidth=2.4, zorder=2)
+            for edge in (low, high):
+                axes.plot([edge, edge], [y - 0.20, y - 0.12], color=BAR_COLOR, linewidth=2.4, zorder=2)
+            axes.text(
+                (low + high) / 2, y - 0.30, f"rango {span:.3f}",
+                ha="center", fontsize=9, color=BAR_COLOR,
+            )
+
+    axes.set_yticks([0, 1])
+    axes.set_yticklabels([config_row_label, seed_row_label], fontsize=9)
+    axes.set_ylim(-0.65, 1.6)
+    axes.set_xlabel("Average precision")
+    axes.set_title(title)
+    axes.grid(alpha=0.25, axis="x")
+
+    seed_span, config_span = spans[seed_row_label], spans[config_row_label]
+    if seed_span >= 1e-6 and config_span >= 1e-6:
+        comparison = "mayor que" if seed_span > config_span else "menor o igual que"
+        figure.text(
+            0.5, 0.015,
+            f"rango entre semillas ({seed_span:.3f}) {comparison} rango entre "
+            f"configuraciones ({config_span:.3f})",
+            ha="center", fontsize=9, color="#333333",
+        )
+
+    figure.tight_layout(rect=(0, 0.06, 1, 1))
     return _save(figure, path)
 
 

@@ -15,6 +15,7 @@ positional         = learned
 pooling            = cls
 numeric_embedding  = affine+buckets
 learning_rate      = 1e-4
+seed               = 1337
 
 
 # ==============================================================================
@@ -125,19 +126,38 @@ dropout            = 0.3
 [X popularity phrase]
 categorical_fields = category, storage_type, allergens, unit_of_measure, popularity_phrase
 
-# --- axis K: learning rate -------------------------------------------------------
-# 1e-4 was never swept. With Adam and a small model, a higher rate may reach a
-# different minimum -- or may not, and that null result is worth having too.
+# --- axis K: learning rate sobre la mejor configuración --------------------------
+# Todos los puntos parten de V d_model 32, 1 capa (AP 0.795), que es la base
+# elegida tras los ejes G y V. El punto 1e-4 ya está medido ahí, así que no se
+# repite. best_epoch en 27-28 sugiere que el modelo no agota el presupuesto de
+# épocas: si un LR más alto llega antes al mismo lugar, se verá en ese número.
+
 [K lr 3e-5]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
 learning_rate      = 3e-5
 
 [K lr 3e-4]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
 learning_rate      = 3e-4
 
 [K lr 1e-3]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
 learning_rate      = 1e-3
 
 [K lr 3e-3]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
 learning_rate      = 3e-3
 
 # --- axis Y: joint capacity, not a single knob ----------------------------------
@@ -160,3 +180,100 @@ d_model            = 32
 # L4 folds) is real enough to also try further out.
 [Z dropout 0.5]
 dropout            = 0.5
+
+
+[G tabular con popularity]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+
+[V sin dropout]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+dropout            = 0.0
+
+[V d_model 32, 1 capa]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+
+[V d_model 32, 1 capa, sin dropout]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+dropout            = 0.0
+
+# ==============================================================================
+# Axis S: same fold split, different initialisation. Training.seed used to be one
+# constant shared by every run; now it is a field of RunConfig, so these four
+# points repeat the winner and the bar under two more seeds, changing nothing
+# else. Written out in full rather than inherited from [DEFAULT], so a later
+# edit to [DEFAULT] cannot silently change what these repeats are repeating.
+# ==============================================================================
+
+[S ganadora seed 7]
+model              = transformer
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+d_model            = 32
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 3e-4
+seed               = 7
+
+[S ganadora seed 99]
+model              = transformer
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+d_model            = 32
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 3e-4
+seed               = 99
+
+# L0 is a logistic regression: today nothing in its scorer reads ``seed`` at all
+# (``logistic_scorer`` takes no seed argument, and ``LogisticRegression`` here is
+# built without ``random_state``). These two will get distinct digests and
+# distinct records, but very likely identical scores to plain L0 -- that gap is
+# itself worth having on record before reading the S table.
+[S L0 seed 7]
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+seed               = 7
+
+[S L0 seed 99]
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+seed               = 99
+

@@ -176,9 +176,17 @@ def explainable(
 
     If the **linear bar won** -- which is what the plan's Stage 2 measured -- the
     architecture still has to be explained, because "where does the attention go" is a
-    claim about our design and not about the winner. So we read the Transformer's own
-    cross-validation fold 0, on that fold's validation rows: rows it never trained on,
-    and **not the holdout, which is not spent a third time to draw a slide.**
+    claim about our design and not about the winner. We prefer whichever Transformer
+    already has a holdout record: that is the one a previous run of this script
+    actually selected and spent the holdout on, and re-explaining it is free. A sweep
+    point added to ``parameters.txt`` afterwards -- another axis knob, or a seed
+    repeat under axis S that exists only to measure variance, never to compete for
+    selection -- must not silently swap out which model gets explained just because it
+    happens to score a hair higher on cross-validation; ``seed_variance`` exists
+    precisely because those differences are not reliable enough to decide anything.
+    Only when nothing has a holdout record yet do we fall back to the best
+    cross-validation score, read on that Transformer's own fold 0, on rows it never
+    trained on -- **not the holdout, which is not spent a third time to draw a slide.**
     """
     if winner.model == TRANSFORMER:
         return Explained(
@@ -189,6 +197,24 @@ def explainable(
             directory=final_directory,
             label="test",
         )
+
+    final_summary = summary_frame(final_directory)
+    if not final_summary.empty:
+        finalists = final_summary[
+            (final_summary["model"] == TRANSFORMER) & (final_summary["name"].isin(declared))
+        ]
+        if not finalists.empty:
+            already_selected = finalists.sort_values(
+                "average_precision_mean", ascending=False
+            ).iloc[0]
+            return Explained(
+                config=declared[already_selected["name"]],
+                fold_index=-1,
+                fitted_on=partitions.development_indices,
+                read_on=partitions.test_indices,
+                directory=final_directory,
+                label="test",
+            )
 
     summary = summary_frame(results_directory)
     if summary.empty:

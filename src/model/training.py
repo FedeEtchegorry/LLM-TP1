@@ -39,6 +39,13 @@ from src.model.records import EpochRecord, TrainedFold
 EARLY_STOPPING_SPLITS = 6
 """One sixth of the training queries carry the patience signal; the rest train."""
 
+EARLY_STOPPING_SPLIT_SEED = 1337
+"""Fixed on purpose, independent of ``config.seed``: which queries carry the patience
+signal is part of the fold, not part of the initialisation. A repeat of a config under
+a different ``seed`` (axis S) should vary the weights and the batch order and nothing
+else -- if this moved with ``config.seed`` too, a seed repeat would also be training on
+a different fit/stop split, and the two effects would be impossible to tell apart."""
+
 
 def spec_for(config: RunConfig) -> EncodingSpec:
     return EncodingSpec(
@@ -58,7 +65,7 @@ def early_stopping_split(
     labels = target[train_indices]
     groups = [query_ids[index] for index in train_indices]
     splitter = StratifiedGroupKFold(
-        n_splits=EARLY_STOPPING_SPLITS, shuffle=True, random_state=TRAINING.seed
+        n_splits=EARLY_STOPPING_SPLITS, shuffle=True, random_state=EARLY_STOPPING_SPLIT_SEED
     )
     features = np.zeros((len(train_indices), 1), dtype=np.uint8)
     fit_rows, stop_rows = next(splitter.split(features, labels, groups=groups))
@@ -206,7 +213,7 @@ def transformer_scorer(
     def score_fold(train_indices, scored_indices) -> np.ndarray:
         index = len(folds) if folds is not None else 0
         trained = train_fold(
-            config, frame, train_indices, seed=TRAINING.seed + index
+            config, frame, train_indices, seed=config.seed + index
         )
         if folds is not None:
             folds.append(trained)
