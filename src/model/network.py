@@ -29,13 +29,20 @@ INIT_STD = 0.02
 """The notebook's initialisation, kept."""
 
 
+PERIODIC_FREQUENCIES = 8
+PERIODIC_SIGMA = 1.0
+
+
 class NumericEmbedding(nn.Module):
     """One vector per numeric column, computed from the value rather than looked up.
 
     ``mode`` is axis A: ``affine`` keeps only the ordered term, ``buckets`` only the
     free-form one, ``affine+buckets`` sums them, and ``none`` leaves the position in
     the sequence but reads no value from it -- a column the model knows is there and
-    nothing else.
+    nothing else. ``piecewise`` weights one vector per bucket by how far the value
+    travelled through each, so it bends like ``buckets`` and stays ordered like
+    ``affine``; ``periodic`` reads the value through ``sin`` and ``cos`` at learned
+    frequencies instead.
     """
 
     def __init__(
@@ -46,6 +53,8 @@ class NumericEmbedding(nn.Module):
         self.n_buckets = n_buckets
         self.affine = mode in ("affine", "affine+buckets")
         self.bucketed = mode in ("buckets", "affine+buckets")
+        self.piecewise = mode == "piecewise"
+        self.periodic = mode == "periodic"
 
         self.bias = nn.Parameter(torch.zeros(n_fields, d_model))
         self.missing = nn.Parameter(torch.randn(d_model) * INIT_STD)
@@ -63,8 +72,29 @@ class NumericEmbedding(nn.Module):
         if self.buckets is not None:
             nn.init.normal_(self.buckets.weight, std=INIT_STD)
 
+        self.pieces = (
+            nn.Parameter(torch.randn(n_fields, n_buckets, d_model) * INIT_STD)
+            if self.piecewise
+            else None
+        )
+
+        if self.periodic:
+            self.frequencies = nn.Parameter(
+                torch.randn(n_fields, PERIODIC_FREQUENCIES) * PERIODIC_SIGMA
+            )
+            self.projection = nn.Parameter(
+                torch.randn(n_fields, 2 * PERIODIC_FREQUENCIES, d_model) * INIT_STD
+            )
+        else:
+            self.frequencies = None
+            self.projection = None
+
     def forward(
-        self, values: torch.Tensor, buckets: torch.Tensor, missing: torch.Tensor
+        self,
+        values: torch.Tensor,
+        buckets: torch.Tensor,
+        missing: torch.Tensor,
+        ratios: torch.Tensor,
     ) -> torch.Tensor:
         """``(batch, n_fields)`` in, ``(batch, n_fields, d_model)`` out."""
         out = self.bias.unsqueeze(0).expand(values.shape[0], -1, -1).clone()
@@ -73,6 +103,12 @@ class NumericEmbedding(nn.Module):
         if self.buckets is not None:
             offsets = torch.arange(self.n_fields, device=buckets.device) * self.n_buckets
             out = out + self.buckets(buckets + offsets)
+        if self.pieces is not None:
+            out = out + torch.einsum("bfk,fkd->bfd", ratios, self.pieces)
+        if self.frequencies is not None:
+            angles = 2.0 * math.pi * values.unsqueeze(-1) * self.frequencies
+            waves = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
+            out = out + torch.einsum("bfk,fkd->bfd", waves, self.projection)
         return out + missing.unsqueeze(-1) * self.missing
 
 
@@ -158,7 +194,10 @@ class BtrTransformer(nn.Module):
 
         if self.numbers is not None:
             numeric = self.numbers(
-                batch.numeric_values, batch.numeric_buckets, batch.numeric_missing
+                batch.numeric_values,
+                batch.numeric_buckets,
+                batch.numeric_missing,
+                batch.numeric_ratios,
             )
             x = torch.cat([x, numeric], dim=1)
             mask = torch.cat(

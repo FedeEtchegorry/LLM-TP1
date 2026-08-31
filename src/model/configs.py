@@ -29,7 +29,14 @@ MODELS = (LOGISTIC, TRANSFORMER, FROZEN, FINETUNE)
 PRETRAINED = (FROZEN, FINETUNE)
 """The two that start from somebody else's weights instead of from noise."""
 
-NUMERIC_EMBEDDINGS = ("none", "affine", "buckets", "affine+buckets")
+NUMERIC_EMBEDDINGS = (
+    "none",
+    "affine",
+    "buckets",
+    "affine+buckets",
+    "piecewise",
+    "periodic",
+)
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
 

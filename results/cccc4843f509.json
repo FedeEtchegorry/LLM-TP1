@@ -1,0 +1,151 @@
+{
+  "schema": 3,
+  "name": "L0 linear bar",
+  "digest": "cccc4843f509",
+  "recorded_at": "2026-08-31T12:30:55+00:00",
+  "seconds": 0.307,
+  "config": {
+    "name": "L0 linear bar",
+    "model": "logistic",
+    "text_fields": [],
+    "categorical_fields": [
+      "popularity_phrase",
+      "category",
+      "allergens"
+    ],
+    "numeric_fields": [
+      "price_position"
+    ],
+    "d_model": 64,
+    "n_layers": 2,
+    "n_heads": 4,
+    "dropout": 0.1,
+    "positional": "learned",
+    "pooling": "cls",
+    "numeric_embedding": "affine+buckets"
+  },
+  "training": {
+    "n_buckets": 10,
+    "max_text_tokens": 64,
+    "epochs": 60,
+    "batch_size": 64,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "patience": 10,
+    "seed": 1337,
+    "regularisation": 1.0
+  },
+  "device": "cpu (x86_64)",
+  "protocol": {
+    "dataset": "data/supermarket_products.csv",
+    "folds": 5,
+    "test_fraction": 0.2,
+    "random_state": 42,
+    "save_weights": true
+  },
+  "metrics": {
+    "roc_auc_mean": 0.9746540372003395,
+    "roc_auc_std": 0.002666407297862175,
+    "average_precision_mean": 0.8129638268421416,
+    "average_precision_std": 0.008302144449045075
+  },
+  "folds": [
+    {
+      "fold_index": 0,
+      "roc_auc": 0.9771624174399847,
+      "average_precision": 0.8204047566989672,
+      "n_train": 6401,
+      "n_scored": 1597,
+      "seconds": 0.06691691908054054,
+      "best_epoch": null,
+      "train_ap": null,
+      "train_loss": null,
+      "validation_loss": null,
+      "gap": null
+    },
+    {
+      "fold_index": 1,
+      "roc_auc": 0.97380136039374,
+      "average_precision": 0.8082822015383824,
+      "n_train": 6399,
+      "n_scored": 1599,
+      "seconds": 0.056871608016081154,
+      "best_epoch": null,
+      "train_ap": null,
+      "train_loss": null,
+      "validation_loss": null,
+      "gap": null
+    },
+    {
+      "fold_index": 2,
+      "roc_auc": 0.9705589028282161,
+      "average_precision": 0.8023357776406391,
+      "n_train": 6392,
+      "n_scored": 1606,
+      "seconds": 0.05542849493212998,
+      "best_epoch": null,
+      "train_ap": null,
+      "train_loss": null,
+      "validation_loss": null,
+      "gap": null
+    },
+    {
+      "fold_index": 3,
+      "roc_auc": 0.9767887240274093,
+      "average_precision": 0.8221185131507642,
+      "n_train": 6398,
+      "n_scored": 1600,
+      "seconds": 0.05538176896516234,
+      "best_epoch": null,
+      "train_ap": null,
+      "train_loss": null,
+      "validation_loss": null,
+      "gap": null
+    },
+    {
+      "fold_index": 4,
+      "roc_auc": 0.9749587813123476,
+      "average_precision": 0.8116778851819553,
+      "n_train": 6402,
+      "n_scored": 1596,
+      "seconds": 0.05599575396627188,
+      "best_epoch": null,
+      "train_ap": null,
+      "train_loss": null,
+      "validation_loss": null,
+      "gap": null
+    }
+  ],
+  "curves": [
+    {
+      "fold_index": 0,
+      "best_epoch": 0,
+      "parameters": 51,
+      "epochs": []
+    },
+    {
+      "fold_index": 1,
+      "best_epoch": 0,
+      "parameters": 51,
+      "epochs": []
+    },
+    {
+      "fold_index": 2,
+      "best_epoch": 0,
+      "parameters": 51,
+      "epochs": []
+    },
+    {
+      "fold_index": 3,
+      "best_epoch": 0,
+      "parameters": 51,
+      "epochs": []
+    },
+    {
+      "fold_index": 4,
+      "best_epoch": 0,
+      "parameters": 51,
+      "epochs": []
+    }
+  ]
+}
