@@ -34,6 +34,11 @@ def result_path(config: RunConfig, directory: Path | str = RESULTS_DIR) -> Path:
     return Path(directory) / f"{config.digest}.json"
 
 
+def _first_existing(paths) -> Path | None:
+    """First cache artifact present across the current and compatible digest layouts."""
+    return next((path for path in paths if path.exists()), None)
+
+
 def save(
     config: RunConfig,
     result: EvaluationResult,
@@ -66,32 +71,29 @@ def save(
             "average_precision_mean": result.average_precision_mean,
             "average_precision_std": result.average_precision_std,
         },
-        "folds": _folds_with_diagnostics(result.folds, curves or []),
+        "folds": folds_with_diagnostics(
+            [asdict(fold) for fold in result.folds], curves or []
+        ),
         "curves": curves or [],
     }
     path.write_text(json.dumps(document, indent=2, default=list), encoding="utf-8")
     return path
 
 
-def _folds_with_diagnostics(folds, curves: list[dict]) -> list[dict]:
-    """Each fold's stored metrics, plus what the curve looked like at ``best_epoch``.
-
-    A model with no epochs (the logistic bar) still gets a valid row, with these
-    fields set to ``None`` rather than omitted, so ``fold_frame`` never has to guess
-    whether a column is missing or genuinely absent for that regime.
-    """
+def folds_with_diagnostics(folds: list[dict], curves: list[dict]) -> list[dict]:
+    """Add best-epoch diagnostics to serialized folds."""
     curves_by_fold = {curve["fold_index"]: curve for curve in curves}
     rows = []
     for fold in folds:
-        row = asdict(fold)
-        epochs = curves_by_fold.get(fold.fold_index, {}).get("epochs", [])
+        row = dict(fold)
+        epochs = curves_by_fold.get(fold["fold_index"], {}).get("epochs", [])
         if not epochs:
             row.update(
                 best_epoch=None, train_ap=None, train_loss=None,
                 validation_loss=None, gap=None,
             )
         else:
-            best_epoch = curves_by_fold[fold.fold_index]["best_epoch"]
+            best_epoch = curves_by_fold[fold["fold_index"]]["best_epoch"]
             record = next(e for e in epochs if e["epoch"] == best_epoch)
             row.update(
                 best_epoch=best_epoch,
@@ -108,8 +110,10 @@ def load(
     config: RunConfig, directory: Path | str = RESULTS_DIR
 ) -> EvaluationResult | None:
     """The recorded result for this exact configuration, or ``None`` if there is none."""
-    path = result_path(config, directory)
-    if not path.exists():
+    path = _first_existing(
+        Path(directory) / f"{digest}.json" for digest in config.compatible_digests
+    )
+    if path is None:
         return None
     document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("schema") != SCHEMA:
@@ -138,8 +142,10 @@ def document(
     ``load`` returns only what the protocol needs; the transfer and final tables also
     quote how many parameters were trained and how long it took, which live here.
     """
-    path = result_path(config, directory)
-    if not path.exists():
+    path = _first_existing(
+        Path(directory) / f"{digest}.json" for digest in config.compatible_digests
+    )
+    if path is None:
         return None
     stored = json.loads(path.read_text(encoding="utf-8"))
     return stored if stored.get("schema") == SCHEMA else None
@@ -175,8 +181,12 @@ def load_weights(
     """The stored parameters for one fold, or ``None`` if that fold was never saved."""
     import torch
 
-    path = weights_path(config, fold_index, directory)
-    if not path.exists():
+    label = "test" if fold_index < 0 else f"fold-{fold_index}"
+    path = _first_existing(
+        Path(directory) / WEIGHTS_DIR / digest / f"{label}.pt"
+        for digest in config.compatible_digests
+    )
+    if path is None:
         return None
     return torch.load(path, map_location="cpu", weights_only=True)["state"]
 
@@ -240,8 +250,11 @@ def load_fold_predictions(
     just without the figures that need row-level scores."""
     import numpy as np
 
-    path = fold_predictions_path(config, directory)
-    if not path.exists():
+    path = _first_existing(
+        Path(directory) / FOLD_PREDICTIONS_DIR / f"{digest}.npz"
+        for digest in config.compatible_digests
+    )
+    if path is None:
         return None
     with np.load(path) as archive:
         fold_indices = sorted({int(name.rsplit("_", 1)[-1]) for name in archive.files})
@@ -268,8 +281,47 @@ def save_predictions(
 def load_predictions(config: RunConfig, directory: Path | str = RESULTS_DIR):
     import numpy as np
 
-    path = predictions_path(config, directory)
-    return np.load(path) if path.exists() else None
+    path = _first_existing(
+        Path(directory) / f"{digest}.predictions.npy"
+        for digest in config.compatible_digests
+    )
+    return np.load(path) if path is not None else None
+
+
+def members_path(config: RunConfig, directory: Path | str = RESULTS_DIR) -> Path:
+    """``results/<digest>.members.npz``: one ensemble's members, before averaging."""
+    return Path(directory) / f"{config.digest}.members.npz"
+
+
+def save_members(
+    config: RunConfig, members: list[dict], *, directory: Path | str = RESULTS_DIR
+) -> Path:
+    """Store each ensemble member's probabilities."""
+    import numpy as np
+
+    path = members_path(config, directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        **{f"scored_{i}": fold["scored"] for i, fold in enumerate(members)},
+        **{f"members_{i}": fold["members"] for i, fold in enumerate(members)},
+    )
+    return path
+
+
+def load_members(config: RunConfig, directory: Path | str = RESULTS_DIR):
+    """The saved members as ``[{"scored": ..., "members": ...}, ...]``, or ``None``."""
+    import numpy as np
+
+    path = members_path(config, directory)
+    if not path.exists():
+        return None
+    with np.load(path) as stored:
+        count = sum(1 for key in stored.files if key.startswith("members_"))
+        return [
+            {"scored": stored[f"scored_{i}"], "members": stored[f"members_{i}"]}
+            for i in range(count)
+        ]
 
 
 def documents(directory: Path | str = RESULTS_DIR) -> list[dict]:

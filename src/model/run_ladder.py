@@ -18,6 +18,7 @@ import time
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import PARAMETERS_PATH, PROTOCOL, ladder_runs, load_parameters
+from src.model.console import utf8_console
 from src.model.experiment import describe, partition, run_one, sweep_note
 from src.model.protocol import EvaluationResult, markdown_table
 from src.model.results import RESULTS_DIR
@@ -35,6 +36,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     args = parse_args(argv)
     runs = ladder_runs(load_parameters(args.parameters))
     if args.only:

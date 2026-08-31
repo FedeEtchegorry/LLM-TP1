@@ -106,10 +106,12 @@ def train_fold(
     import torch.nn as nn
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+    from src.model.hardware import deterministic
     from src.model.hardware import device as best_device
     from src.model.network import count_parameters
     from src.model.training import early_stopping_split
 
+    deterministic()
     torch.manual_seed(seed)
     device = device or best_device()
 

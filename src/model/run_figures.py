@@ -27,6 +27,7 @@ from src.model.configs import (
     ladder_runs,
     load_parameters,
 )
+from src.model.console import utf8_console
 from src.model.diagnostics import (
     Scored,
     calibration,
@@ -131,6 +132,7 @@ def cached_test(config: RunConfig, directory: str) -> tuple | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
     figures_dir = Path(args.figures)

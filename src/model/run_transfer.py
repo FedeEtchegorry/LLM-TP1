@@ -42,6 +42,7 @@ from src.model.configs import (
     load_parameters,
     transfer_runs,
 )
+from src.model.console import utf8_console
 from src.model.experiment import describe, partition, run_one
 from src.model.figures import FIGURES_DIR, similarity_against_gap
 from src.model.protocol import EvaluationResult, markdown_table
@@ -107,10 +108,15 @@ def regime_table(rows: list[dict]) -> str:
     ]
     for row in rows:
         parameters = "—" if row["parameters"] is None else f"{row['parameters']:,}"
+        seconds = (
+            "—"
+            if row["seconds_per_fold"] is None
+            else f"{row['seconds_per_fold']:.0f}"
+        )
         lines.append(
             f"| {row['regime']} | {row['name']} | {row['folds']} "
             f"| {row['roc_auc']:.3f} | {row['average_precision']:.3f} "
-            f"| {parameters} | {row['seconds_per_fold']:.0f} |"
+            f"| {parameters} | {seconds} |"
         )
     return "\n".join(lines)
 
@@ -165,6 +171,7 @@ def similarity_slide(frame: pd.DataFrame, figures: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
     runs = transfer_runs(declared)

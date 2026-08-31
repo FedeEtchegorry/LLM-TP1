@@ -59,16 +59,11 @@ class ParameterError(ValueError):
 
 @dataclass(frozen=True)
 class Training:
-    """The same for every run, so no run can win by training longer than another.
-
-    """
+    """What no experiment may move, so every run is comparable on the parts that count."""
 
     n_buckets: int = 10
     max_text_tokens: int = 64
-    epochs: int = 60
-    batch_size: int = 64
-    weight_decay: float = 0.01
-    patience: int = 10
+    seed: int = 1337
     regularisation: float = 1.0
 
 
@@ -131,22 +126,26 @@ class RunConfig:
     positional: str
     pooling: str
     numeric_embedding: str
-    learning_rate: float = 1e-4
-    """Was a ``Training`` constant; now a per-run knob so axis K can sweep it. Kept
-    out of the ``sorted(asdict(self))`` bucket in ``digest`` below, so the field
-    moving here does not, by itself, move any existing run's digest."""
-    seed: int = 1337
-    """Was also a ``Training`` constant, for the same reason and with the same
-    digest treatment: a fold used to be confounded with its initialisation --
-    ``seed=TRAINING.seed + fold_index`` -- with no way to repeat one fold under a
-    different draw. Now a run can fix ``seed`` and vary nothing else."""
 
-    _DIGEST_TRAINING_FIELDS: ClassVar[tuple[str, ...]] = ("learning_rate", "seed")
-    """Fields that moved here from ``Training``. Grouped with the rest of
-    ``Training`` in ``digest``, not with this run's own fields, so every digest
-    computed before either field moved is byte-for-byte identical to the one
-    computed after -- the field's home changed, not the value a fixed run carries.
-    """
+    learning_rate: float = 1e-4
+    weight_decay: float = 0.01
+    epochs: int = 60
+    patience: int = 10
+    batch_size: int = 64
+
+    seed: int = 1337
+    checkpoints: int = 1
+    seeds: int = 1
+
+    _DIGEST_TRAINING_FIELDS: ClassVar[tuple[str, ...]] = ("seed",)
+    _LEGACY_TRAINING_FIELDS: ClassVar[tuple[str, ...]] = (
+        "learning_rate",
+        "weight_decay",
+        "epochs",
+        "patience",
+        "batch_size",
+        "seed",
+    )
 
     @property
     def digest(self) -> str:
@@ -156,15 +155,33 @@ class RunConfig:
         fine-tuning budget should not invalidate a Transformer trained from scratch,
         which never read it.
         """
-        config_fields = {
-            key: value
-            for key, value in asdict(self).items()
-            if key not in self._DIGEST_TRAINING_FIELDS
-        }
-        training_fields = {
-            **asdict(TRAINING),
-            **{key: getattr(self, key) for key in self._DIGEST_TRAINING_FIELDS},
-        }
+        config_fields = asdict(self)
+        # Preserve cache keys for the default single-model run.
+        for name in ("seeds", "checkpoints"):
+            if config_fields[name] == 1:
+                del config_fields[name]
+        training_fields = asdict(TRAINING)
+        for name in self._DIGEST_TRAINING_FIELDS:
+            training_fields[name] = config_fields.pop(name)
+        return self._digest_from(config_fields, training_fields)
+
+    @property
+    def compatible_digests(self) -> tuple[str, ...]:
+        """Return current and equivalent historical cache keys."""
+        current = self.digest
+        if self.seeds != 1 or self.checkpoints != 1:
+            return (current,)
+
+        config_fields = asdict(self)
+        del config_fields["seeds"]
+        del config_fields["checkpoints"]
+        training_fields = asdict(TRAINING)
+        for name in self._LEGACY_TRAINING_FIELDS:
+            training_fields[name] = config_fields.pop(name)
+        legacy = self._digest_from(config_fields, training_fields)
+        return tuple(dict.fromkeys((current, legacy)))
+
+    def _digest_from(self, config_fields: dict, training_fields: dict) -> str:
         payload = [
             sorted(config_fields.items()),
             sorted(training_fields.items()),
@@ -232,8 +249,14 @@ def _run(name: str, section) -> RunConfig:
             positional=section.get("positional"),
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
-            learning_rate=section.getfloat("learning_rate"),
-            seed=section.getint("seed"),
+            learning_rate=section.getfloat("learning_rate", fallback=1e-4),
+            weight_decay=section.getfloat("weight_decay", fallback=0.01),
+            epochs=section.getint("epochs", fallback=60),
+            patience=section.getint("patience", fallback=10),
+            batch_size=section.getint("batch_size", fallback=64),
+            seed=section.getint("seed", fallback=1337),
+            seeds=section.getint("seeds", fallback=1),
+            checkpoints=section.getint("checkpoints", fallback=1),
         )
     except (TypeError, ValueError) as error:
         raise ParameterError(f"[{name}] is malformed: {error}") from error
@@ -254,6 +277,17 @@ def _validate(config: RunConfig) -> None:
             f"[{name}] {config.model} declares no text_fields, and a pretrained "
             "language model has nothing to transfer without text"
         )
+    for value, label in (
+        (config.epochs, "epochs"),
+        (config.patience, "patience"),
+        (config.batch_size, "batch_size"),
+        (config.seeds, "seeds"),
+        (config.checkpoints, "checkpoints"),
+    ):
+        if value < 1:
+            raise ParameterError(f"[{name}] {label}={value} must be at least 1")
+    if config.learning_rate <= 0:
+        raise ParameterError(f"[{name}] learning_rate must be positive")
     if config.model != TRANSFORMER:
         return
     for value, allowed, label in (

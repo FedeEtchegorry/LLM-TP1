@@ -29,7 +29,7 @@ class FoldScore:
     average_precision: float
     n_train: int
     n_scored: int
-    seconds: float
+    seconds: float | None = None
 
 
 @dataclass(frozen=True)

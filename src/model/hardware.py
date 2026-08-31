@@ -1,9 +1,4 @@
-"""Pick the best device available and name it for the record.
-
-Every model runs on the accelerator when there is one. Records store which device
-produced them, because floating-point reductions associate differently and a results
-directory should not mix them silently.
-"""
+"""Device selection and deterministic execution."""
 
 from __future__ import annotations
 
@@ -19,6 +14,20 @@ def device(preferred: str | None = None):
     if torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
+
+
+_DETERMINISTIC = False
+
+
+def deterministic() -> None:
+    """Enable deterministic PyTorch algorithms once."""
+    global _DETERMINISTIC
+    if _DETERMINISTIC:
+        return
+    import torch
+
+    torch.use_deterministic_algorithms(True)
+    _DETERMINISTIC = True
 
 
 def describe(target) -> str:

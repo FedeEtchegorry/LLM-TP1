@@ -40,3 +40,4 @@ class TrainedFold:
     encoder: object | None = None
     curve: list[EpochRecord] = field(default_factory=list)
     best_epoch: int = 0
+    states: list[dict] = field(default_factory=list)

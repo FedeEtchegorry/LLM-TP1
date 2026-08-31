@@ -36,6 +36,7 @@ from src.model.results import (
     load_predictions,
     save,
     save_fold_predictions,
+    save_members,
     save_predictions,
     save_weights,
 )
@@ -83,7 +84,10 @@ def folds_for(config: RunConfig, partitions: DataPartitions) -> DataPartitions:
 
 
 def scorer_for(
-    config: RunConfig, frame: pd.DataFrame, trained: list[TrainedFold]
+    config: RunConfig,
+    frame: pd.DataFrame,
+    trained: list[TrainedFold],
+    members: list | None = None,
 ) -> ScoreFold:
     """The one place a model name becomes a model. Four regimes, one signature."""
     if config.model == LOGISTIC:
@@ -111,7 +115,7 @@ def scorer_for(
         from src.model.finetuning import finetune_scorer
 
         return finetune_scorer(config, frame, folds=trained)
-    return transformer_scorer(config, frame, folds=trained)
+    return transformer_scorer(config, frame, folds=trained, members=members)
 
 
 def run_one(
@@ -130,15 +134,22 @@ def run_one(
 
     trained: list[TrainedFold] = []
     predicted: list[np.ndarray] = []
+    members: list = []
     folds = folds_for(config, partitions)
     started = time.perf_counter()
     result = evaluate_across_folds(
         config.name,
         target_of(frame),
         folds,
-        _reporting(_capturing(scorer_for(config, frame, trained), predicted), len(folds.folds), started),
+        _reporting(
+            _capturing(scorer_for(config, frame, trained, members), predicted),
+            len(folds.folds),
+            started,
+        ),
     )
     seconds = time.perf_counter() - started
+    if config.seeds > 1 and members:
+        save_members(config, members, directory=directory)
 
     save(
         config,

@@ -46,6 +46,10 @@ a different ``seed`` (axis S) should vary the weights and the batch order and no
 else -- if this moved with ``config.seed`` too, a seed repeat would also be training on
 a different fit/stop split, and the two effects would be impossible to tell apart."""
 
+INFERENCE_BATCH = 256
+
+MEMBER_STRIDE = 1000
+
 
 def spec_for(config: RunConfig) -> EncodingSpec:
     return EncodingSpec(
@@ -84,7 +88,10 @@ def train_fold(
     device=None,
 ) -> TrainedFold:
     """Fit one model, stopping on held-out training queries rather than on the fold."""
+    from src.model.hardware import deterministic
     from src.model.hardware import device as best_device
+
+    deterministic()
 
     torch.manual_seed(seed)
     device = device or best_device()
@@ -103,7 +110,7 @@ def train_fold(
     optimiser = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
-        weight_decay=TRAINING.weight_decay,
+        weight_decay=config.weight_decay,
     )
     loss_of = nn.BCEWithLogitsLoss()
     generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -111,12 +118,13 @@ def train_fold(
     curve: list[EpochRecord] = []
     best_loss, best_epoch = float("inf"), 0
     best_state = copy.deepcopy(model.state_dict())
+    best_states: list[tuple[float, int, dict]] = []
 
-    for epoch in range(1, TRAINING.epochs + 1):
+    for epoch in range(1, config.epochs + 1):
         model.train()
         order = torch.randperm(len(fit_rows), generator=generator).to(device)
-        for start in range(0, len(order), TRAINING.batch_size):
-            rows = order[start : start + TRAINING.batch_size]
+        for start in range(0, len(order), config.batch_size):
+            rows = order[start : start + config.batch_size]
             optimiser.zero_grad(set_to_none=True)
             loss = loss_of(model(fit_rows.select(rows)), fit_target[rows])
             loss.backward()
@@ -128,10 +136,15 @@ def train_fold(
             EpochRecord(epoch, train_loss, train_ap, stop_loss, stop_ap)
         )
 
+        if config.checkpoints > 1:
+            best_states.append((stop_loss, epoch, _on_cpu(model.state_dict())))
+            best_states.sort(key=lambda kept: kept[0])
+            del best_states[config.checkpoints :]
+
         if stop_loss < best_loss:
             best_loss, best_epoch = stop_loss, epoch
             best_state = copy.deepcopy(model.state_dict())
-        elif epoch - best_epoch >= TRAINING.patience:
+        elif epoch - best_epoch >= config.patience:
             break
 
     model.load_state_dict(best_state)
@@ -141,12 +154,31 @@ def train_fold(
         curve=curve,
         best_epoch=best_epoch,
         parameters=count_parameters(model),
+        states=[state for _, _, state in best_states],
     )
+
+
+def _on_cpu(state: dict) -> dict:
+    return {name: value.detach().to("cpu", copy=True) for name, value in state.items()}
+
+
+@torch.no_grad()
+def _member_scores(trained: TrainedFold, frame, scored_indices) -> list[np.ndarray]:
+    """One vector per kept epoch, or just the best one when only that was kept."""
+    rows = trained.encoder.transform(frame, scored_indices)
+    if not trained.states:
+        return [predict(trained.model, rows)]
+    device = next(trained.model.parameters()).device
+    scores = []
+    for state in trained.states:
+        trained.model.load_state_dict({k: v.to(device) for k, v in state.items()})
+        scores.append(predict(trained.model, rows))
+    return scores
 
 
 @torch.no_grad()
 def predict(model: BtrTransformer, rows: EncodedRows) -> np.ndarray:
-    """Probabilities for every row, in batches so a big fold still fits in memory."""
+    """Return probabilities in bounded inference batches."""
     model.eval()
     device = next(model.parameters()).device
     rows = rows.to(device)
@@ -156,13 +188,13 @@ def predict(model: BtrTransformer, rows: EncodedRows) -> np.ndarray:
                 rows.select(
                     torch.arange(
                         start,
-                        min(start + TRAINING.batch_size, len(rows)),
+                        min(start + INFERENCE_BATCH, len(rows)),
                         device=device,
                     )
                 )
             )
         )
-        for start in range(0, len(rows), TRAINING.batch_size)
+        for start in range(0, len(rows), INFERENCE_BATCH)
     ]
     return torch.cat(scores).cpu().numpy()
 
@@ -184,12 +216,12 @@ def _measure(
                 rows.select(
                     torch.arange(
                         start,
-                        min(start + TRAINING.batch_size, len(rows)),
+                        min(start + INFERENCE_BATCH, len(rows)),
                         device=device,
                     )
                 )
             )
-            for start in range(0, len(rows), TRAINING.batch_size)
+            for start in range(0, len(rows), INFERENCE_BATCH)
         ]
     )
     loss = float(loss_of(logits, target))
@@ -202,21 +234,32 @@ def _measure(
 
 
 def transformer_scorer(
-    config: RunConfig, frame: pd.DataFrame, *, folds: list | None = None
+    config: RunConfig,
+    frame: pd.DataFrame,
+    *,
+    folds: list | None = None,
+    members: list | None = None,
 ) -> ScoreFold:
-    """The Transformer as a ``ScoreFold``, so it reports into the same table as the bar.
-
-    ``folds`` collects one :class:`TrainedFold` per call, in order, so the caller can
-    record the curves and save the weights without training anything twice.
-    """
+    """Build a fold scorer with optional seed and checkpoint averaging."""
 
     def score_fold(train_indices, scored_indices) -> np.ndarray:
         index = len(folds) if folds is not None else 0
-        trained = train_fold(
-            config, frame, train_indices, seed=config.seed + index
-        )
+        base = config.seed + index
+        trained = [
+            train_fold(config, frame, train_indices, seed=base + member * MEMBER_STRIDE)
+            for member in range(config.seeds)
+        ]
         if folds is not None:
-            folds.append(trained)
-        return predict(trained.model, trained.encoder.transform(frame, scored_indices))
+            folds.append(trained[0])
+        scored = np.stack(
+            [
+                output
+                for m in trained
+                for output in _member_scores(m, frame, scored_indices)
+            ]
+        )
+        if members is not None:
+            members.append({"scored": np.asarray(scored_indices), "members": scored})
+        return scored.mean(axis=0)
 
     return score_fold

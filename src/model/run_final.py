@@ -50,6 +50,7 @@ from src.model.configs import (
     RunConfig,
     load_parameters,
 )
+from src.model.console import utf8_console
 from src.model.diagnostics import (
     Scored,
     bucket_embedding_axis,
@@ -365,6 +366,7 @@ def interpretability(
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     from src.model.figures import calibration as calibration_figure
     from src.model.figures import errors_by_level as errors_figure
     from src.model.figures import ranking_gains as gains_figure

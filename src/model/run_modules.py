@@ -11,21 +11,44 @@ from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import asdict
 
 from src.eda.loading import load_dataset
 from src.model.configs import (
     PARAMETERS_PATH,
     PROTOCOL,
+    RunConfig,
     axis_runs,
     ladder_runs,
     load_parameters,
 )
+from src.model.console import utf8_console
 from src.model.experiment import describe, partition, run_one, sweep_note
 from src.model.protocol import EvaluationResult
 from src.model.results import RESULTS_DIR
 
 BASE = "L4"
 """The rung every axis point is compared against."""
+
+
+def differences(run: RunConfig, base: RunConfig) -> list[str]:
+    """The fields where ``run`` departs from ``base``, ignoring the name."""
+    left, right = asdict(run), asdict(base)
+    return sorted(key for key in left if key != "name" and left[key] != right[key])
+
+
+def axis_points(
+    declared: dict[str, RunConfig], base: RunConfig
+) -> tuple[dict[str, RunConfig], dict[str, list[str]]]:
+    """Partition declared axes into single-field points and rejected runs."""
+    kept, dropped = {}, {}
+    for name, run in axis_runs(declared).items():
+        moved = differences(run, base)
+        if len(moved) == 1:
+            kept[name] = run
+        else:
+            dropped[name] = moved
+    return kept, dropped
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -61,17 +84,20 @@ def comparison_table(base: EvaluationResult, results: list[EvaluationResult]) ->
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
-    points = axis_runs(declared)
+    base_config = next(
+        run for name, run in ladder_runs(declared).items() if name.startswith(BASE)
+    )
+    points, dropped = axis_points(declared, base_config)
+    for name, moved in dropped.items():
+        print(f"  skipping [{name}]: moves {len(moved)} fields from {BASE}, not one")
     if args.axis:
         points = {
             name: run for name, run in points.items()
             if name.startswith(f"{args.axis.upper()} ")
         }
-    base_config = next(
-        run for name, run in ladder_runs(declared).items() if name.startswith(BASE)
-    )
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)
