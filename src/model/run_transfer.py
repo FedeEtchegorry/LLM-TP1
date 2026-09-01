@@ -43,6 +43,7 @@ from src.model.configs import (
     transfer_runs,
 )
 from src.model.console import utf8_console
+from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one
 from src.model.figures import FIGURES_DIR, similarity_against_gap
 from src.model.protocol import EvaluationResult, markdown_table
@@ -174,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
+    if Path(args.parameters).name == "parameters-eda.txt":
+        require_valid(declared)
     runs = transfer_runs(declared)
     if args.only:
         runs = {name: run for name, run in runs.items() if args.only in name}

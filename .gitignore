@@ -51,6 +51,9 @@ coverage.xml
 *.py.cover
 .hypothesis/
 .pytest_cache/
+tmp/
+logs/
+results/
 cover/
 
 # Translations
@@ -227,3 +230,4 @@ tests/
 
 # Trained weights -- large and regenerable; the JSON metrics beside them are not
 results/weights/
+**/weights/

@@ -7,6 +7,7 @@ because these end up on the slides while the code and the docs stay in English.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from math import sqrt
 from pathlib import Path
 
@@ -932,16 +933,36 @@ def seed_collapse(
     return _save(figure, path)
 
 
+ENCODING_LABELS = {
+    "bolsa binaria": "Bolsa de palabras",
+    "tf-idf": "TF-IDF",
+    "one-hot": "One-hot",
+    "target encoding suavizado": "Target encoding",
+    "continuo estandarizado": "Affine",
+    "buckets por cuantiles": "Buckets",
+    "continuo + buckets": "Affine + buckets",
+    "piecewise-linear": "Piecewise",
+}
+"""Tidy display names, aligned with the vocabulary chart 3 uses for the Transformer's
+numeric embedding (affine/buckets/piecewise) -- these are still a different
+mechanism (see ``model_alias`` module docstring): here they are scalar features
+handed to a plain logistic regression, there they are learned embedding vectors."""
+
+
 def encoding_families(
     folds: pd.DataFrame,
     *,
     title: str,
     path: Path,
     labels: dict[str, str] | None = None,
+    encoding_labels: dict[str, str] | None = None,
 ) -> Path:
-    """Every encoding measured, one panel per family of column."""
+    """Every encoding measured, one panel per family of column -- always scored with
+    the same plain logistic regression (Modelo A's model family); only the column's
+    representation changes between bars."""
     families = list(dict.fromkeys(folds["block"]))
     labels = labels or {}
+    encoding_text = {**ENCODING_LABELS, **(encoding_labels or {})}
     heights = [max(folds[folds["block"] == f]["encoding"].nunique(), 1) for f in families]
     figure, axes = plt.subplots(
         len(families), 1,
@@ -961,16 +982,16 @@ def encoding_families(
         deviations = table["std"].fillna(0.0)
         panel.errorbar(
             table["mean"], positions, xerr=deviations, fmt="o",
-            color=MODEL_COLOR, ecolor="#888888", capsize=3.5, markersize=7.5,
-            lw=1.4, zorder=3,
+            color=MODEL_COLOR, ecolor="#3a3a38", capsize=4, markersize=7.5,
+            lw=1.5, elinewidth=1.3, capthick=1.3, zorder=3,
         )
         for position, (mean, deviation) in enumerate(zip(table["mean"], deviations)):
             panel.text(
-                mean + deviation + 0.004, position, f"{mean:.3f}",
+                mean + deviation + 0.004, position, f"{mean:.3f} ± {deviation:.3f}",
                 va="center", fontsize=8.5, color="#333333",
             )
         panel.set_yticks(positions)
-        panel.set_yticklabels(table.index, fontsize=8.5)
+        panel.set_yticklabels([encoding_text.get(name, name) for name in table.index], fontsize=8.5)
         panel.set_title(labels.get(family, family), fontsize=10, loc="left")
         panel.grid(axis="x", alpha=0.22)
         panel.set_axisbelow(True)
@@ -1024,4 +1045,311 @@ def one_versus_two(
     axes.set_title(title)
     axes.grid(axis="x", alpha=0.25)
     axes.set_axisbelow(True)
+    return _save(figure, path)
+
+
+# ---------------------------------------------------------------------------
+# Ejercicio 2 (EDA contract): chart 2 of the flow -- the L0a/L0/L1/L2/L0b ladder
+# read between its two diagnostic bounds, rather than sorted by rung digit like
+# ``ladder_waterfall`` (which would put L0a, L0 and L0b all on the same "rung 0").
+# ---------------------------------------------------------------------------
+
+
+CATEGORICAL_PALETTE = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
+"""One distinct hue per rung, in narrative (``order``) sequence -- floor and ceiling
+included, no bar singled out as neutral."""
+
+
+def eda_ladder_waterfall(
+    ladder: pd.DataFrame,
+    *,
+    order: list[str],
+    floor: str,
+    ceiling: str,
+    recover_for: str | None = None,
+    label_fn: Callable[[str], str] | None = None,
+    title: str,
+    path: Path,
+) -> Path:
+    """The text ladder read against its floor (no text) and ceiling (hand-extracted
+    key), in the fixed narrative order -- never sorted by name.
+
+    ``ladder`` is ``results.summary_frame()`` (or an equivalent frame) carrying
+    ``name``, ``average_precision_mean`` and ``average_precision_std``, filtered to
+    the rows named in ``order``. ``floor`` and ``ceiling`` must both be in ``order``.
+
+    Bare, presentation-only chart: no title, no recovered-fraction annotation.
+    ``label_fn`` maps each row's full declared name to the text drawn on the axis
+    (default: ``src.model.model_alias.alias_label``, which reads L0/L1/L2 as Modelo
+    A/B/C). The recovered-fraction number the write-up quotes is computed
+    separately, from the same ``ladder`` frame, not read off this figure.
+    """
+    if label_fn is None:
+        from src.model.model_alias import alias_label as label_fn
+    rows = ladder.set_index("name").loc[order].reset_index()
+    floor_ap = float(rows.loc[rows["name"] == floor, "average_precision_mean"].iloc[0])
+    ceiling_ap = float(rows.loc[rows["name"] == ceiling, "average_precision_mean"].iloc[0])
+
+    figure, axes = plt.subplots(figsize=FIGSIZE)
+    figure.patch.set_facecolor("white")
+    axes.set_facecolor("white")
+    positions = np.arange(len(rows))[::-1]  # first in ``order`` drawn at the top
+
+    colours = [CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i in range(len(rows))]
+    axes.barh(
+        positions,
+        rows["average_precision_mean"],
+        xerr=rows["average_precision_std"],
+        color=colours,
+        ecolor="#52514e",
+        capsize=3,
+        error_kw={"linewidth": 1.3},
+        height=0.62,
+        zorder=2,
+    )
+
+    for y, (_, row) in zip(positions, rows.iterrows()):
+        axes.text(
+            row["average_precision_mean"] + row["average_precision_std"] + 0.014,
+            y,
+            f"{row['average_precision_mean']:.3f} ± {row['average_precision_std']:.3f}",
+            va="center",
+            fontsize=9,
+            color="#52514e",
+        )
+
+    axes.set_yticks(positions)
+    axes.set_yticklabels([label_fn(name) for name in rows["name"]], fontsize=10.5)
+    axes.set_xlabel("Average precision")
+    axes.grid(alpha=0.15, axis="x")
+    axes.set_axisbelow(True)
+    for spine in axes.spines.values():
+        spine.set_visible(True)
+        spine.set_color("#52514e")
+        spine.set_linewidth(1.0)
+    axes.tick_params(axis="y", length=0)
+    axes.margins(x=0.14)
+
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+# ---------------------------------------------------------------------------
+# Ejercicio 2 (EDA contract): charts 3-5 of the flow. Implemented and unit-tested
+# against synthetic fixtures; not yet exercised against real data, which needs the
+# full architecture search (Task 5), its greedy-order validation (Task 11) and the
+# holdout (Task 7/9) to have actually run. See ``run_eda_contract_figures.py``.
+# ---------------------------------------------------------------------------
+
+
+def architecture_path(stages: list[dict], *, title: str, path: Path) -> Path:
+    """One row per search stage, the base and every candidate plotted by AP, the
+    selected point highlighted and connected across stages into a single path.
+
+    Each item of ``stages`` is
+    ``{"stage": str, "points": [{"label": str, "ap": float, "outcome": str}, ...],
+    "selected": str}``, where ``outcome`` is one of ``"base"``, ``"improves"``,
+    ``"tie-break"``, ``"inconclusive"`` or ``"loses"`` and ``selected`` names the
+    point (by ``label``) that stage's comparison kept -- exactly what
+    ``advance_complexity``/``resolve_heads`` return, made drawable.
+    """
+    outcome_colour = {
+        "base": NEUTRAL,
+        "improves": OBSERVED_COLOR,
+        "tie-break": HIGHLIGHT,
+        "inconclusive": NEUTRAL,
+        "loses": BAR_COLOR,
+    }
+    figure, axes = plt.subplots(figsize=(WIDE[0], 0.9 * len(stages) + 1.6))
+    positions = np.arange(len(stages))[::-1]
+
+    path_x: list[float] = []
+    path_y: list[float] = []
+    for y, stage in zip(positions, stages):
+        for point in stage["points"]:
+            colour = outcome_colour.get(point["outcome"], NEUTRAL)
+            is_selected = point["label"] == stage["selected"]
+            axes.scatter(
+                point["ap"], y,
+                s=140 if is_selected else 55,
+                color=colour,
+                edgecolor="black" if is_selected else "none",
+                linewidth=1.4 if is_selected else 0,
+                zorder=4 if is_selected else 3,
+            )
+            axes.text(
+                point["ap"], y + 0.22,
+                point["label"],
+                ha="center", fontsize=7.5,
+                fontweight="bold" if is_selected else "normal",
+                color="#222222" if is_selected else "#666666",
+            )
+            if is_selected:
+                path_x.append(point["ap"])
+                path_y.append(y)
+
+    axes.plot(path_x, path_y, color="#333333", linewidth=1.2, linestyle=":", zorder=1)
+    axes.set_yticks(positions)
+    axes.set_yticklabels([stage["stage"] for stage in stages], fontsize=9)
+    axes.set_xlabel("Average precision (media entre folds)")
+    axes.set_title(title)
+    axes.grid(alpha=0.2, axis="x")
+    handles = [
+        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=colour, markersize=9, label=label)
+        for label, colour in (
+            ("base / sin evidencia suficiente", NEUTRAL),
+            ("mejora clara", OBSERVED_COLOR),
+            ("desempate (media y desvio)", HIGHLIGHT),
+            ("pierde", BAR_COLOR),
+        )
+    ]
+    axes.legend(handles=handles, loc="lower right", fontsize=8)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def architecture_grid(stages: list[dict], *, title: str, path: Path) -> Path:
+    """One subplot per capacity axis (embedding numerico, profundidad, ancho,
+    heads), all in a single figure: every candidate at that axis as a horizontal
+    bar by AP, one distinct colour per bar, the axis's winner outlined, the exact
+    AP value printed beside each bar.
+
+    Each item of ``stages`` is the same shape ``architecture_path`` takes --
+    ``{"stage": str, "points": [{"label", "ap", "ap_std"?, "outcome"}, ...],
+    "selected": str}`` -- with ``ap_std`` optional (defaults to 0, e.g. for the
+    bundled example fixture, which carries no per-point spread). ``outcome`` is
+    still used to outline the winning bar, not to colour it.
+    """
+    columns = 2
+    grid_rows = -(-len(stages) // columns)
+    figure, grid = plt.subplots(grid_rows, columns, figsize=(WIDE[0], 3.4 * grid_rows))
+    panels = np.atleast_1d(grid).ravel()
+
+    for panel, stage in zip(panels, stages):
+        points = stage["points"]
+        positions = np.arange(len(points))[::-1]
+        colours = [CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i in range(len(points))]
+        edges = ["black" if point["label"] == stage["selected"] else "none" for point in points]
+        errors = [point.get("ap_std", 0.0) for point in points]
+        panel.barh(
+            positions,
+            [point["ap"] for point in points],
+            xerr=errors,
+            color=colours,
+            edgecolor=edges,
+            linewidth=1.6,
+            ecolor="#3a3a38",
+            error_kw={"elinewidth": 1.3, "capthick": 1.3},
+            capsize=4,
+            height=0.6,
+            zorder=2,
+        )
+        for y, point, error in zip(positions, points, errors):
+            panel.text(
+                point["ap"] + error + 0.006,
+                y,
+                f"{point['ap']:.3f} ± {error:.3f}",
+                va="center", fontsize=8, color="#52514e",
+            )
+        panel.set_yticks(positions)
+        panel.set_yticklabels([point["label"] for point in points], fontsize=8.5)
+        panel.set_xlabel("Average precision", fontsize=9)
+        panel.set_title(stage["stage"][:1].upper() + stage["stage"][1:], fontsize=10.5)
+        panel.grid(alpha=0.15, axis="x")
+        panel.set_axisbelow(True)
+        panel.margins(x=0.22)
+        for spine in panel.spines.values():
+            spine.set_visible(True)
+            spine.set_color("#52514e")
+            spine.set_linewidth(0.8)
+
+    for panel in panels[len(stages):]:
+        panel.set_visible(False)
+
+    handles = [
+        plt.Line2D([0], [0], marker="s", color="w", markerfacecolor="white",
+                   markeredgecolor="black", markeredgewidth=1.6, markersize=9,
+                   label="elegida en ese eje"),
+    ]
+    figure.legend(handles=handles, loc="lower center", ncol=1, fontsize=8.5, bbox_to_anchor=(0.5, -0.01))
+    if title:
+        figure.suptitle(title, fontsize=11.5)
+    figure.tight_layout(rect=(0, 0.04, 1, 0.95 if title else 1.0))
+    return _save(figure, path)
+
+
+def greedy_neighbourhood_forest(
+    moves: pd.DataFrame,
+    *,
+    selected_name: str,
+    title: str,
+    path: Path,
+) -> Path:
+    """Every single-coordinate probe from the selected point, as a delta with its
+    paired margin -- the same picture as ``ablation_forest``, but for Task 11's
+    depth-reopening and single-move neighbourhood rather than the module axes.
+
+    ``moves`` carries ``name``, ``delta``, ``low`` and ``high`` (the paired-margin
+    bounds of ``delta``, from ``representation_selection.paired_margin``). A move
+    whose margin clears zero (``low > 0``) is drawn in the "improves" colour; every
+    other move, including a tie-break, is neutral, because Task 11 only ever accepts
+    ``improves`` to replace the selected configuration.
+    """
+    table = moves.sort_values("delta")
+    positions = np.arange(len(table))
+    colours = [OBSERVED_COLOR if low > 0 else NEUTRAL for low in table["low"]]
+
+    figure, axes = plt.subplots(figsize=(10, 0.6 * len(table) + 2.0))
+    axes.errorbar(
+        table["delta"], positions,
+        xerr=[table["delta"] - table["low"], table["high"] - table["delta"]],
+        fmt="o", ecolor="#888888", capsize=4, markersize=0, lw=1.6, zorder=2,
+    )
+    axes.scatter(table["delta"], positions, color=colours, s=80, zorder=3, edgecolor="white")
+    axes.axvline(0.0, color="#333333", linewidth=2.0, zorder=1)
+    for position, (delta, low, high) in enumerate(zip(table["delta"], table["low"], table["high"])):
+        axes.text(
+            delta, position + 0.24,
+            f"{delta:+.4f}  [{low:+.4f}, {high:+.4f}]",
+            ha="center", fontsize=8, color="#333333",
+        )
+    axes.set_yticks(positions)
+    axes.set_yticklabels(table["name"], fontsize=9)
+    axes.set_ylim(-0.7, len(table) - 0.2)
+    axes.set_xlabel(f"Δ AP pareado vs [{selected_name}]")
+    axes.set_title(title)
+    axes.grid(axis="x", alpha=0.25)
+    axes.set_axisbelow(True)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def final_candidates_bar(rows: list[dict], *, title: str, path: Path) -> Path:
+    """The last chart of the flow: only the frozen finalists, on the holdout.
+
+    ``rows`` is ``[{"name": str, "ap": float, "std": float}, ...]`` -- typically the
+    linear reference and the chosen candidate, in that order. Unlike every earlier
+    chart this one is not a decision aid: it exists to report the single number the
+    whole search was aimed at, once, after the holdout has actually been opened.
+    """
+    figure, axes = plt.subplots(figsize=(7, 4.5))
+    positions = np.arange(len(rows))
+    heights = [row["ap"] for row in rows]
+    errors = [row["std"] for row in rows]
+    colours = [NEUTRAL] + [MODEL_COLOR] * (len(rows) - 1)
+
+    axes.bar(positions, heights, yerr=errors, color=colours[: len(rows)], capsize=6, zorder=2)
+    for x, row in zip(positions, rows):
+        axes.text(
+            x, row["ap"] + row["std"] + 0.01,
+            f"AP {row['ap']:.3f} ± {row['std']:.3f}",
+            ha="center", fontsize=9,
+        )
+    axes.set_xticks(positions)
+    axes.set_xticklabels([row["name"] for row in rows], fontsize=9)
+    axes.set_ylabel("Average precision (holdout)")
+    axes.set_title(title)
+    axes.grid(axis="y", alpha=0.25)
+    axes.set_axisbelow(True)
+    figure.tight_layout()
     return _save(figure, path)

@@ -151,11 +151,20 @@ class RunConfig:
     def digest(self) -> str:
         """Stable across processes, and sensitive to the constants above.
 
+        Two sections with different names but byte-identical parameters are the same
+        experiment and must land on the same cache file: ``name`` is stored inside the
+        JSON record for display, but never enters the hash. This is what lets
+        ``run_architecture``'s candidates and ``run_greedy_validation``'s probes reuse
+        each other's cache when they resolve to the same underlying configuration --
+        the whole point of ``run_greedy_validation`` costing zero retrains when the
+        greedy walk never moved off its base.
+
         ``TRANSFER`` enters only for the two pretrained regimes: changing the
         fine-tuning budget should not invalidate a Transformer trained from scratch,
         which never read it.
         """
         config_fields = asdict(self)
+        del config_fields["name"]
         # Preserve cache keys for the default single-model run.
         for name in ("seeds", "checkpoints"):
             if config_fields[name] == 1:
@@ -173,6 +182,7 @@ class RunConfig:
             return (current,)
 
         config_fields = asdict(self)
+        del config_fields["name"]
         del config_fields["seeds"]
         del config_fields["checkpoints"]
         training_fields = asdict(TRAINING)
@@ -307,6 +317,17 @@ def _validate(config: RunConfig) -> None:
             f"[{name}] with n_layers=0 the [CLS] position is never updated, "
             "so pooling must be mean or attention"
         )
+
+
+def changed_fields(left: RunConfig, right: RunConfig) -> tuple[str, ...]:
+    """The dataclass fields where ``right`` departs from ``left``, name excluded.
+
+    Shared by every task that needs to prove a comparison changed exactly one
+    thing: the architecture search (Task 5), its greedy-order validation
+    (Task 11), and the stability seeds (Task 7), which change only ``seed``.
+    """
+    a, b = asdict(left), asdict(right)
+    return tuple(sorted(key for key in a if key != "name" and a[key] != b[key]))
 
 
 def _tuple(value: str | None) -> tuple[str, ...]:

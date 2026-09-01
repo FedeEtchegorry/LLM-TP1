@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from sklearn.linear_model import LogisticRegression
 from src.eda.loading import load_dataset
 from src.model.baseline import OneHotLevels, WordIndicators, target_of
 from src.model.configs import PROTOCOL
+from src.model.eda_contract import CONTRACT_FIELDS
 from src.model.embeddings import (
     Continuous,
     ContinuousAndBuckets,
@@ -24,6 +26,7 @@ from src.model.embeddings import (
 )
 from src.model.experiment import partition
 from src.model.protocol import ScoreFold, evaluate_across_folds
+from src.model.representation_selection import MOVES, compare
 from src.model.results import RESULTS_DIR
 
 BAR_CAT = ("popularity_phrase", "category", "allergens")
@@ -181,6 +184,159 @@ BLOCKS = {
     "fields": ("COLUMNAS: las 4 del informe contra las 9 que recibe el modelo", FIELD_CASES),
 }
 
+# ==============================================================================
+# Task 3 (Ejercicio 2): the eight-case sweep under the frozen EDA contract. Every
+# case here represents the full six columns; only the encoding of one family
+# changes at a time, and the two families not under test keep their reference
+# encoding. Used when --results points at results/eda-contract.
+# ==============================================================================
+
+CONTRACT_TEXT = ("title", "description", "ingredients")
+CONTRACT_CAT = ("category", "allergens")
+CONTRACT_NUM = "price_position"
+
+TEXT_REFERENCE = "bolsa binaria"
+CATEGORICAL_REFERENCE = "one-hot"
+NUMERIC_REFERENCE = "buckets por cuantiles"
+
+
+def _reference_categorical():
+    return OneHotLevels(CONTRACT_CAT)
+
+
+def _reference_numeric():
+    return QuantileBucketsBlock(CONTRACT_NUM)
+
+
+def _reference_text():
+    return WordIndicators(CONTRACT_TEXT)
+
+
+TEXT_CONTRACT_CASES = [
+    (TEXT_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
+    ("tf-idf", lambda: [TfidfWords(CONTRACT_TEXT), _reference_categorical(), _reference_numeric()]),
+]
+
+CATEGORICAL_CONTRACT_CASES = [
+    (CATEGORICAL_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
+    (
+        "target encoding suavizado",
+        lambda: [_reference_text()]
+        + [TargetEncoded(name) for name in CONTRACT_CAT]
+        + [_reference_numeric()],
+    ),
+]
+
+NUMERIC_CONTRACT_CASES = [
+    (NUMERIC_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
+    (
+        "continuo estandarizado",
+        lambda: [_reference_text(), _reference_categorical(), Continuous(CONTRACT_NUM)],
+    ),
+    (
+        "continuo + buckets",
+        lambda: [_reference_text(), _reference_categorical(), ContinuousAndBuckets(CONTRACT_NUM)],
+    ),
+    (
+        "piecewise-linear",
+        lambda: [_reference_text(), _reference_categorical(), PiecewiseLinear(CONTRACT_NUM)],
+    ),
+    (
+        "periodic",
+        lambda: [_reference_text(), _reference_categorical(), Periodic(CONTRACT_NUM)],
+    ),
+]
+
+CONTRACT_BLOCKS = {
+    "text": ("TEXTO bajo el contrato EDA", TEXT_CONTRACT_CASES),
+    "categorical": ("CATEGORICAS bajo el contrato EDA", CATEGORICAL_CONTRACT_CASES),
+    "numeric": ("NUMERICA bajo el contrato EDA", NUMERIC_CONTRACT_CASES),
+}
+
+
+def represented_fields(make_blocks) -> frozenset[str]:
+    """Every column a case's blocks read, text, categorical and numeric together."""
+    fields: set[str] = set()
+    for block in make_blocks():
+        fields.update(getattr(block, "fields", (getattr(block, "name", None),)))
+    fields.discard(None)
+    return frozenset(fields)
+
+
+def _family_selection(cases, block_key: str) -> tuple[dict[str, np.ndarray], str, dict]:
+    """Run every case in one family, then resolve reference vs. alternatives.
+
+    Returns the per-case AP arrays (five folds each), the selected case name, and the
+    ``selection.json`` entry for this family.
+    """
+    reference_name = cases[0][0]
+    per_case: dict[str, np.ndarray] = {}
+    selected, selected_ap = reference_name, None
+    reason = None
+    for name, make_blocks in cases:
+        scorer = blocks_scorer(make_blocks, _CONTRACT_FRAME)
+        result = evaluate_across_folds(name, _CONTRACT_TARGET, _CONTRACT_PARTITIONS, scorer)
+        ap = np.array([fold.average_precision for fold in result.folds], dtype=float)
+        per_case[name] = ap
+        if name == reference_name:
+            selected_ap = ap
+            continue
+        outcome = compare(per_case[reference_name], ap)
+        if outcome in MOVES:
+            selected, selected_ap = name, ap
+            reason = f"{name} {outcome} over {reference_name} by the declared paired margin"
+        elif reason is None:
+            reason = f"{name} did not improve {reference_name} by the declared paired margin"
+    entry = {"reference": reference_name, "selected": selected, "reason": reason}
+    return per_case, selected, entry
+
+
+_CONTRACT_FRAME = None
+_CONTRACT_TARGET = None
+_CONTRACT_PARTITIONS = None
+
+
+def run_contract_sweep(results: Path | str) -> tuple[pd.DataFrame, dict]:
+    """The eight-case, five-fold sweep of Task 3, plus the chained selection.
+
+    Text is resolved first, then categorical (fed by the text choice only insofar as
+    the *other two* families of every case always use their own reference encoding --
+    "families not under test keep the reference"), then numeric. Writes
+    ``linear-sweep.csv`` and ``selection.json`` under ``results``.
+    """
+    global _CONTRACT_FRAME, _CONTRACT_TARGET, _CONTRACT_PARTITIONS
+
+    frame = load_dataset(PROTOCOL.dataset)
+    _CONTRACT_FRAME = frame
+    _CONTRACT_TARGET = target_of(frame)
+    _CONTRACT_PARTITIONS = partition(frame)
+
+    for _, cases in CONTRACT_BLOCKS.values():
+        for name, make_blocks in cases:
+            assert represented_fields(make_blocks) == CONTRACT_FIELDS, name
+
+    records: list[dict] = []
+    selection: dict[str, dict] = {}
+    for block, (title, cases) in CONTRACT_BLOCKS.items():
+        print(f"\n=== {title} ===")
+        per_case, selected, entry = _family_selection(cases, block)
+        selection[block] = entry
+        for name, ap in per_case.items():
+            for fold_index, value in enumerate(ap):
+                records.append(
+                    {"block": block, "encoding": name, "fold": fold_index, "average_precision": value}
+                )
+        print(f"  selected: {selected}  ({entry['reason']})")
+
+    table = pd.DataFrame(records)
+    sweep_path_out = write_sweep(table, results)
+    selection_path = Path(results) / EMBEDDINGS_DIR / "selection.json"
+    selection_path.parent.mkdir(parents=True, exist_ok=True)
+    selection_path.write_text(json.dumps(selection, indent=2), encoding="utf-8")
+    print(f"\n{len(records)} filas escritas en {sweep_path_out}")
+    print(f"seleccion escrita en {selection_path}")
+    return table, selection
+
 
 def run_block(title, cases, frame, partitions, target, block: str) -> list[dict]:
     print(f"\n=== {title} ===")
@@ -219,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     args = parser.parse_args(argv)
+
+    if Path(args.results).name == "eda-contract" or "eda-contract" in Path(args.results).parts:
+        run_contract_sweep(args.results)
+        return 0
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)

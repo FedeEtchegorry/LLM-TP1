@@ -51,6 +51,7 @@ from src.model.configs import (
     load_parameters,
 )
 from src.model.console import utf8_console
+from src.model.eda_contract import FINALISTS, require_valid
 from src.model.diagnostics import (
     Scored,
     bucket_embedding_axis,
@@ -98,12 +99,15 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def select(
-    declared: dict[str, RunConfig], directory: str
+    declared: dict[str, RunConfig], directory: str, *, restrict_to: tuple[str, ...] | None = None
 ) -> tuple[RunConfig, pd.DataFrame]:
     """The declared run with the best cross-validated AP, and the table it came from.
 
     Only declared sections are eligible: a record left over from a parameter file that
-    has since changed is history, not a candidate.
+    has since changed is history, not a candidate. When ``restrict_to`` is given (the
+    ``FINALISTS`` tuple, under the EDA contract) only those names may win: a diagnostic
+    bound or a validation probe never becomes a finalist just by scoring well on
+    cross-validation.
     """
     summary = summary_frame(directory)
     if summary.empty:
@@ -111,11 +115,12 @@ def select(
             f"no cross-validation runs recorded in {directory}/ -- run "
             "src.model.run_ladder (and run_modules, run_transfer) before selecting"
         )
-    eligible = summary[summary["name"].isin(declared)]
+    eligible_names = set(declared) if restrict_to is None else set(declared) & set(restrict_to)
+    eligible = summary[summary["name"].isin(eligible_names)]
     if eligible.empty:
         raise SystemExit(
-            f"none of the runs recorded in {directory}/ is still declared in the "
-            "parameter file; nothing can be selected"
+            f"none of the runs recorded in {directory}/ is still declared (and eligible) "
+            "in the parameter file; nothing can be selected"
         )
     ranked = eligible.sort_values("average_precision_mean", ascending=False)
     return declared[ranked.iloc[0]["name"]], ranked
@@ -375,18 +380,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     figures = Path(args.figures)
     declared = load_parameters(args.parameters)
+    if Path(args.parameters).name == "parameters-eda.txt":
+        require_valid(declared)
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)
     describe(frame, partitions)
 
+    under_contract = Path(args.parameters).name == "parameters-eda.txt"
     if args.config:
         matching = [run for name, run in declared.items() if args.config in name]
         if not matching:
             raise SystemExit(f"no declared section matches {args.config!r}")
         winner, ranking = matching[0], summary_frame(args.results)
     else:
-        winner, ranking = select(declared, args.results)
+        winner, ranking = select(
+            declared, args.results, restrict_to=FINALISTS if under_contract else None
+        )
 
     print("\n=== SELECTED ON CROSS-VALIDATION, NEVER ON THE HOLDOUT ===")
     if not ranking.empty:
@@ -399,8 +409,15 @@ def main(argv: list[str] | None = None) -> int:
         print(display[["name", "digest", "model", "ROC", "AP"]].to_string(index=False))
     print(f"\nfinal model: [{winner.name}] ({winner.model}, digest {winner.digest})")
 
-    bar = next((run for name, run in declared.items() if name.startswith(BAR)), None)
-    chosen = [winner] + ([bar] if bar is not None and bar.name != winner.name else [])
+    if under_contract:
+        # Task 7 Step 6 spends the holdout once per declared finalist, not just on
+        # whichever one won cross-validation -- L0 is always the bar the winner has
+        # to beat, so both get a holdout record even when they are the same run.
+        bar = declared.get(FINALISTS[0])
+        chosen = [declared[name] for name in FINALISTS if name in declared]
+    else:
+        bar = next((run for name, run in declared.items() if name.startswith(BAR)), None)
+        chosen = [winner] + ([bar] if bar is not None and bar.name != winner.name else [])
 
     print(f"\n=== THE HOLDOUT, {len(partitions.test_indices)} ROWS, SCORED ONCE ===")
     target = target_of(frame)

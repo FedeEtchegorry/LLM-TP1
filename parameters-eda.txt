@@ -1,0 +1,90 @@
+[DEFAULT]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+# ==============================================================================
+# Task 4: the two diagnostic bounds, then the real ladder.
+#   L0a  no text at all              -> floor
+#   L0   text crudo, lineal          -> what a linear model extracts by reading
+#   L1   learned embeddings          -> what learning the representation adds
+#   L2   with self-attention         -> what attention adds
+#   L0b  the hand-extracted key      -> ceiling of the text
+# L0a and L0b are diagnostic controls: never candidates, never in the architecture
+# search, never scored on the holdout.
+# ==============================================================================
+
+[L0a linear, no text]
+# Floor: how much is predictable without reading a single word.
+model       = logistic
+text_fields =
+
+[L0b linear, extracted key only]
+# Ceiling of the text: the popularity phrase, extracted by hand, no raw text.
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+
+[L0 linear raw EDA]
+# The reproducible linear reference over the full EDA contract, no phrase.
+model = logistic
+
+[L1 learned embeddings, no attention]
+n_layers = 0
+
+[L2 learned embeddings with attention]
+
+# ==============================================================================
+# Task 6: M is declared exactly as Task 5's run_architecture.py resolves it.
+# Until the architecture search is actually run and recorded, M is an explicit
+# repetition of L2 -- the documented fallback for "no stage improved" -- and the
+# comment says so; it is not a manually chosen depth/width/heads combination.
+# ==============================================================================
+
+[M selected from directed comparisons]
+# Resolved by src.model.run_architecture from architecture/selection.json
+# (final_config): depth 2 beat depth 1 by the paired margin, then d_model 96 beat
+# 64; n_heads, positional, pooling and dropout stayed at their L2/DEFAULT values.
+d_model  = 96
+n_layers = 2
+
+# ==============================================================================
+# Task 7: stability seeds. Each S section copies M literally and changes only
+# the seed.
+# ==============================================================================
+
+[S selected seed 7]
+d_model  = 96
+n_layers = 2
+seed = 7
+
+[S selected seed 99]
+d_model  = 96
+n_layers = 2
+seed = 99
+
+# ==============================================================================
+# Task 8: transfer learning, same six columns as every other candidate. The text
+# is serialised as title + description + ingredients; category, allergens and
+# price_position ride along on the same tabular blocks the bar uses.
+# ==============================================================================
+
+[T frozen MiniLM]
+model = frozen
+
+[T finetuned MiniLM]
+model = finetune

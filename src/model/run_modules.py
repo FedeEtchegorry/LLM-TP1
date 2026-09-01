@@ -10,6 +10,7 @@ attributable to that one thing. The table reports the change, not just the level
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import time
 from dataclasses import asdict
 
@@ -23,6 +24,7 @@ from src.model.configs import (
     load_parameters,
 )
 from src.model.console import utf8_console
+from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, sweep_note
 from src.model.protocol import EvaluationResult
 from src.model.results import RESULTS_DIR
@@ -87,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
+    if Path(args.parameters).name == "parameters-eda.txt":
+        require_valid(declared)
     base_config = next(
         run for name, run in ladder_runs(declared).items() if name.startswith(BASE)
     )

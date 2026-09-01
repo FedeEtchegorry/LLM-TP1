@@ -187,8 +187,9 @@ n_layers           = 1
 d_model            = 32
 n_layers           = 1
 
-[Y d_model 32, 2 capas]
-d_model            = 32
+# [Y d_model 32, 2 capas] removed: with n_layers=2 inherited from [DEFAULT], it
+# declared the exact same configuration as [D d_model 32] under a second name.
+# See test_no_two_runs_share_a_digest.
 
 # --- axis Z: heavier regularisation ---------------------------------------------
 # Axis H already tried 0.0 and 0.3; the gap at the best epoch (0.06-0.13 on the
