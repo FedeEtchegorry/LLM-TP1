@@ -311,13 +311,13 @@ def chart_5_final(results: str, figures: Path) -> Path:
             for name in ("L0 linear raw EDA", "M selected from directed comparisons")
         ]
         print(f"  [4] {final_dir} tiene el holdout real de L0 y M")
-        label = "5. L0 vs M, en el holdout (una sola vez)"
+        label = "5. A vs C*, en el holdout (una sola vez)"
         out = figures / "05-final-holdout.png"
     else:
         print(f"  [5] el holdout todavia no se abrio para L0 y M en {final_dir} "
               "(correr src.model.run_final) -- usando datos de EJEMPLO, no reales")
         rows = EXAMPLE_FINAL_ROWS
-        label = "5. [EJEMPLO, no datos reales] L0 vs M, en el holdout"
+        label = "5. [EJEMPLO, no datos reales] A vs C*, en el holdout"
         out = figures / "05-final-holdout-EJEMPLO.png"
     path = fig.final_candidates_bar(rows, title=label, path=out)
     print(f"  [5] {path}")

@@ -34,6 +34,15 @@ T95_DF4 = 2.776
 always produces 5 paired folds, too few to lean on the normal approximation instead."""
 
 
+def _framed(axes) -> None:
+    """Draw all four spines -- the global style hides top/right by default, but a
+    handful of charts (the Ejercicio 2 decision figures) are meant to look boxed."""
+    for spine in axes.spines.values():
+        spine.set_visible(True)
+        spine.set_color("#52514e")
+        spine.set_linewidth(0.8)
+
+
 # ---------------------------------------------------------------------------
 # Stage 4: what the frozen encoder thinks the popularity phrases mean.
 # ---------------------------------------------------------------------------
@@ -145,12 +154,14 @@ def roc_and_pr(
     left.set_title("ROC")
     left.grid(alpha=0.25)
     left.legend(loc="lower right", fontsize=8)
+    _framed(left)
 
     right.set_xlabel("Recall")
     right.set_ylabel("Precision")
     right.set_title("Precision-Recall")
     right.grid(alpha=0.25)
     right.legend(loc="upper right", fontsize=8)
+    _framed(right)
 
     figure.suptitle(title)
     figure.tight_layout()
@@ -203,6 +214,7 @@ def calibration(table: pd.DataFrame, *, title: str, path: Path, error: float) ->
     axes.set_title(f"{title}   —   error de calibracion {error:.4f}")
     axes.grid(alpha=0.25)
     axes.legend(loc="upper left", fontsize=9)
+    _framed(axes)
     return _save(figure, path)
 
 
@@ -229,6 +241,7 @@ def ranking_gains(
         axes.set_xscale("log")
         axes.grid(alpha=0.25, which="both")
         axes.legend(loc="best", fontsize=8)
+        _framed(axes)
 
     figure.suptitle(title)
     figure.tight_layout()
@@ -1331,18 +1344,21 @@ def final_candidates_bar(rows: list[dict], *, title: str, path: Path) -> Path:
     linear reference and the chosen candidate, in that order. Unlike every earlier
     chart this one is not a decision aid: it exists to report the single number the
     whole search was aimed at, once, after the holdout has actually been opened.
+
+    No error bars: the holdout is scored exactly once per candidate (not across
+    folds), so ``std`` is identically zero here and would carry no information --
+    unlike every earlier chart, which compares several folds.
     """
     figure, axes = plt.subplots(figsize=(7, 4.5))
     positions = np.arange(len(rows))
     heights = [row["ap"] for row in rows]
-    errors = [row["std"] for row in rows]
-    colours = [NEUTRAL] + [MODEL_COLOR] * (len(rows) - 1)
+    colours = [CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i in range(len(rows))]
 
-    axes.bar(positions, heights, yerr=errors, color=colours[: len(rows)], capsize=6, zorder=2)
+    axes.bar(positions, heights, color=colours, zorder=2)
     for x, row in zip(positions, rows):
         axes.text(
-            x, row["ap"] + row["std"] + 0.01,
-            f"AP {row['ap']:.3f} ± {row['std']:.3f}",
+            x, row["ap"] + 0.01,
+            f"AP {row['ap']:.3f}",
             ha="center", fontsize=9,
         )
     axes.set_xticks(positions)
@@ -1351,5 +1367,6 @@ def final_candidates_bar(rows: list[dict], *, title: str, path: Path) -> Path:
     axes.set_title(title)
     axes.grid(axis="y", alpha=0.25)
     axes.set_axisbelow(True)
+    _framed(axes)
     figure.tight_layout()
     return _save(figure, path)

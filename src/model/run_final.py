@@ -52,6 +52,7 @@ from src.model.configs import (
 )
 from src.model.console import utf8_console
 from src.model.eda_contract import FINALISTS, require_valid
+from src.model.model_alias import alias_label
 from src.model.diagnostics import (
     Scored,
     bucket_embedding_axis,
@@ -427,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         result, predicted, note = run_test(
             config, frame, partitions, directory=args.final, force=args.force
         )
-        scores.append(Scored(config.name, actual, np.asarray(predicted, dtype=float)))
+        scores.append(Scored(alias_label(config.name), actual, np.asarray(predicted, dtype=float)))
         print(f"  {config.digest}  {result.summary_row()}   [{note}]")
 
     positive_rate = float(actual.mean())

@@ -1,16 +1,17 @@
-"""Display-only relabeling for the story's figures: L0/L1/L2 become Modelo A/B/C,
-and every architecture-search variant becomes "Modelo C (campo=valor, ...)" instead
-of its axis-letter codename (``B depth 2``, ``D d_model 96``, ``V neighbour n_heads
-8``, ...). This only parses the predictable name patterns run_architecture.py and
+"""Display-only relabeling for the story's figures: L0/L1/L2 become the bare letters
+A/B/C (no "Modelo" prefix -- the charts already make clear these are models), and
+every architecture-search variant becomes "C (campo=valor, ...)" instead of its
+axis-letter codename (``B depth 2``, ``D d_model 96``, ``V neighbour n_heads 8``,
+...). This only parses the predictable name patterns run_architecture.py and
 run_greedy_validation.py generate -- it never touches the underlying run names,
 digests or caching, purely how charts label things.
 
-    Modelo A = L0, texto crudo con un modelo lineal (la referencia).
-    Modelo B = L1, el mismo contrato de columnas con embeddings aprendidos, sin
-               autoatención.
-    Modelo C = L2, Modelo B con un bloque de autoatención agregado.
-    Modelo C* = M, el resultado de la búsqueda dirigida de arquitectura a partir de
-                Modelo C -- se nombra por sus variables cambiadas, no por letra.
+    A  = L0, texto crudo con un modelo lineal (la referencia).
+    B  = L1, el mismo contrato de columnas con embeddings aprendidos, sin
+         autoatención.
+    C  = L2, B con un bloque de autoatención agregado.
+    C* = M, el resultado de la búsqueda dirigida de arquitectura a partir de C --
+         se nombra por sus variables cambiadas, no por letra.
 """
 
 from __future__ import annotations
@@ -19,14 +20,14 @@ import re
 from collections.abc import Callable
 
 BASE_ALIAS = {
-    # The two diagnostic bounds are Modelo A (same logistic model) with its input
-    # changed, not a model of their own -- named that way rather than "piso"/"techo".
-    "L0a linear, no text": "Modelo A (sin texto)",
-    "L0 linear raw EDA": "Modelo A",
-    "L1 learned embeddings, no attention": "Modelo B",
-    "L2 learned embeddings with attention": "Modelo C",
-    "L0b linear, extracted key only": "Modelo A (sin texto, + clave extraída)",
-    "M selected from directed comparisons": "Modelo C*",
+    # The two diagnostic bounds are A (same logistic model) with its input changed,
+    # not a model of their own -- named that way rather than "piso"/"techo".
+    "L0a linear, no text": "A (sin texto)",
+    "L0 linear raw EDA": "A",
+    "L1 learned embeddings, no attention": "B",
+    "L2 learned embeddings with attention": "C",
+    "L0b linear, extracted key only": "A (sin texto, + clave extraída)",
+    "M selected from directed comparisons": "C*",
 }
 
 FIELD_LABEL = {
@@ -74,7 +75,7 @@ def alias_label(name: str) -> str:
             changes = ", ".join(
                 f"{FIELD_LABEL.get(field, field)}={value}" for field, value in extractor(match)
             )
-            return f"Modelo C ({changes})"
+            return f"C ({changes})"
     return name
 
 
