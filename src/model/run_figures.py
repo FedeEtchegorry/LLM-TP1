@@ -21,7 +21,7 @@ import numpy as np
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import (
-    PARAMETERS_PATH,
+    EDA_PARAMETERS,
     PROTOCOL,
     TRAINING,
     RunConfig,
@@ -87,7 +87,7 @@ INTERPRETABILITY_FIGURES = (
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--figures", type=str, default=str(fig.FIGURES_DIR))
     parser.add_argument("--only", type=str, default="", help="draw just the matching figure(s)")
@@ -212,14 +212,11 @@ def main(argv: list[str] | None = None) -> int:
         if cached is not None:
             scores.append(Scored(alias_label(bar_config.name), actual, np.asarray(cached[1], dtype=float)))
 
-    # A -- el lineal que compitio contra C* -- no se dibuja aca por decision explicita:
-    # estas figuras muestran C* contra la cota A*, y la comparacion entre finalistas
-    # vive en ``final/comparison.json``. Para devolverlo, leer sus predicciones de
-    # ``final/linear-predictions.npz`` y sumarlo a ``scores`` antes de la cota.
+    # A no se dibuja aca: estas figuras muestran C* contra la cota A*. Para devolverlo,
+    # leer ``final/linear-predictions.npz`` y sumarlo a ``scores`` antes de la cota.
 
-    # A*, la cota diagnostica: la logistica sin texto crudo pero con
-    # ``popularity_phrase`` extraida a mano. No compitio y nada se eligio con ella. Va
-    # ultima para que ``scores[0]`` siga siendo el finalista.
+    # A* va ultima para que ``scores[0]`` siga siendo el finalista en las figuras que
+    # dibujan un solo modelo.
     techo = next((run for name, run in declared.items() if name.startswith("L0b")), None)
     if techo is not None:
         cached = cached_test(techo, final_dir)

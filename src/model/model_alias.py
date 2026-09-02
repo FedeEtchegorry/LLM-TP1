@@ -6,12 +6,12 @@ axis-letter codename (``B depth 2``, ``D d_model 96``, ``V neighbour n_heads 8``
 run_greedy_validation.py generate -- it never touches the underlying run names,
 digests or caching, purely how charts label things.
 
-    A  = L0, texto crudo con un modelo lineal (la referencia).
+    A  = el lineal sobre el texto crudo (la referencia).
+    A* = la cota: sin texto crudo, con la frase del título extraída a mano.
     B  = L1, el mismo contrato de columnas con embeddings aprendidos, sin
          autoatención.
     C  = L2, B con un bloque de autoatención agregado.
-    C* = M, el resultado de la búsqueda dirigida de arquitectura a partir de C --
-         se nombra por sus variables cambiadas, no por letra.
+    C* = C con la arquitectura resuelta por la búsqueda.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ BASE_ALIAS = {
     "L0 linear raw EDA": "A",
     "L1 learned embeddings, no attention": "B",
     "L2 learned embeddings with attention": "C",
+    "L0b linear, extracted key only": "A*",
     "M selected from directed comparisons": "C*",
     "FINAL bracket d96 L2 h4 piecewise do0.3 lr2e-4 seed99": "C*",
     "L0* lineal (tf-idf, 453 params)": "A",

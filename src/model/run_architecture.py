@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import PARAMETERS_PATH, RunConfig, ladder_runs, load_parameters
+from src.model.configs import EDA_PARAMETERS, RunConfig, ladder_runs, load_parameters
 from src.model.eda_contract import changed_fields, find_prefix, require_valid
 from src.model.experiment import describe, partition, run_one
 from src.model.protocol import EvaluationResult
@@ -172,7 +172,7 @@ def _post_candidate(base: RunConfig, name: str, field: str, value: object) -> Ru
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)

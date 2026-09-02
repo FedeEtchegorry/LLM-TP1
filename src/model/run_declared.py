@@ -7,7 +7,7 @@ import time
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import PARAMETERS_PATH, PROTOCOL, RunConfig, load_parameters
+from src.model.configs import EDA_PARAMETERS, PROTOCOL, RunConfig, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, sweep_note
@@ -27,7 +27,7 @@ def selected_runs(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--prefix", type=str, required=True)
     parser.add_argument(

@@ -1,4 +1,109 @@
+# Declared runs for Exercise 2, under the input contract Exercise 1 hands over.
+#
+# Only what the plan declares by hand lives here. The architecture search of
+# Task 5 and the validation probes of Task 11 build their candidates in code
+# with dataclasses.replace, so no depth, width or head section appears below --
+# declaring them here would rebuild the cartesian grid the plan exists to avoid.
+#
+# Selectors that read this file (src/model/configs.py):
+#   ladder_runs    ^L\d      -> L0a, L0b, L0, L1, L2      (run_ladder)
+#   transfer_runs  ^T        -> the two pretrained runs    (run_transfer)
+#   axis_runs      ^[A-Z] .. -> would also catch M and S; run_modules is not
+#                               part of this plan's flow, so do not point it here.
+#   run_declared --prefix    -> how S and M are executed instead.
+
 [DEFAULT]
+model              = transformer
+
+# The contract. No candidate may add a column, and none may drop one.
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+
+# Small base, as the assignment asks: d_model < 100 and one block.
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = affine+buckets
+
+# Fixed optimisation protocol. Identical for every rung and every comparison.
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+# =============================================================================
+# The two diagnostic bounds. They frame what the text can be worth. Neither is a
+# candidate, neither enters the architecture search, neither is ever a finalist.
+# =============================================================================
+
+# Floor: what is predictable without reading a single word.
+[L0a linear, no text]
+model              = logistic
+text_fields        =
+
+# Ceiling of the text: the parenthetical popularity phrase pulled out of the
+# title by hand, with no raw text at all. The EDA found three well separated
+# tiers in it (~0.65, ~0.02, 0.00), so this is very close to the label's key.
+[L0b linear, extracted key only]
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+
+
+# =============================================================================
+# The ladder. Same columns throughout; one mechanism enters at a time.
+# =============================================================================
+
+# The fair linear reference: raw text, no hand-extracted phrase.
+[L0 linear raw EDA]
+model              = logistic
+
+# Learned embeddings, averaged. No attention at all.
+[L1 learned embeddings, no attention]
+n_layers           = 0
+
+# The only difference against L1 is n_layers, which is the point.
+[L2 learned embeddings with attention]
+
+
+# =============================================================================
+# Diagnostic control. Full contract PLUS the extracted phrase, to measure what
+# the hand extraction adds on top of the text the model actually reads.
+# Never a finalist.
+# =============================================================================
+
+[Q engineered popularity control]
+model              = logistic
+categorical_fields = popularity_phrase, category, allergens
+
+
+# =============================================================================
+# The selected candidate, copied verbatim from final_config in
+# results/eda-contract/architecture/selection.json. Do not hand-edit: rerun
+# src.model.run_architecture and copy the block it writes.
+#
+# The directed path moved exactly once, on the numeric embedding: buckets beat
+# L2's affine+buckets by the declared paired margin. Depth, width and heads all
+# kept their base, and neither learned positions nor attention pooling cleared
+# it, so M is L2 with one field changed and no added complexity.
+#
+# RunConfig.digest includes the section name, so this trains once rather than
+# reusing the cached A numeric buckets result; that makes the run a determinism
+# check too, since an identical config on the same seed must reproduce that
+# run's per-fold AP exactly.
+#
+# Values are spelled out rather than inherited so that S below can be diffed
+# against them field by field.
+# =============================================================================
+
+[M selected from directed comparisons]
 model              = transformer
 text_fields        = title, description, ingredients
 categorical_fields = category, allergens
@@ -9,7 +114,7 @@ n_heads            = 4
 dropout            = 0.1
 positional         = none
 pooling            = mean
-numeric_embedding  = affine+buckets
+numeric_embedding  = buckets
 learning_rate      = 1e-4
 weight_decay       = 0.01
 epochs             = 60
@@ -17,74 +122,982 @@ patience           = 10
 batch_size         = 64
 seed               = 1337
 
-# ==============================================================================
-# Task 4: the two diagnostic bounds, then the real ladder.
-#   L0a  no text at all              -> floor
-#   L0   text crudo, lineal          -> what a linear model extracts by reading
-#   L1   learned embeddings          -> what learning the representation adds
-#   L2   with self-attention         -> what attention adds
-#   L0b  the hand-extracted key      -> ceiling of the text
-# L0a and L0b are diagnostic controls: never candidates, never in the architecture
-# search, never scored on the holdout.
-# ==============================================================================
 
-[L0a linear, no text]
-# Floor: how much is predictable without reading a single word.
-model       = logistic
-text_fields =
+# =============================================================================
+# K: the optimisation protocol itself, which every comparison so far held fixed
+# at learning_rate 1e-4. A negative result about the Transformer is only worth
+# reporting if the loss is not an artefact of how it was trained, so this axis
+# is a diagnostic on M. If one point wins by the declared paired margin, L1, L2
+# and M are rerun at that setting so the ladder stays comparable, and the whole
+# ladder is reported at the new protocol.
+#   python -m src.model.run_declared --prefix "K "
+# =============================================================================
 
-[L0b linear, extracted key only]
-# Ceiling of the text: the popularity phrase, extracted by hand, no raw text.
-model              = logistic
-text_fields        =
-categorical_fields = popularity_phrase, category, allergens
+[K lr 3e-5]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-5
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
 
-[L0 linear raw EDA]
-# The reproducible linear reference over the full EDA contract, no phrase.
-model = logistic
 
-[L1 learned embeddings, no attention]
-n_layers = 0
+[K lr 3e-4]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
 
-[L2 learned embeddings with attention]
 
-# ==============================================================================
-# Task 6: M is declared exactly as Task 5's run_architecture.py resolves it.
-# Until the architecture search is actually run and recorded, M is an explicit
-# repetition of L2 -- the documented fallback for "no stage improved" -- and the
-# comment says so; it is not a manually chosen depth/width/heads combination.
-# ==============================================================================
+[K lr 1e-3]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-3
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
 
-[M selected from directed comparisons]
-# Resolved by src.model.run_architecture from architecture/selection.json
-# (final_config): depth 2 beat depth 1 by the paired margin, then d_model 96 beat
-# 64; n_heads, positional, pooling and dropout stayed at their L2/DEFAULT values.
-d_model  = 96
-n_layers = 2
 
-# ==============================================================================
-# Task 7: stability seeds. Each S section copies M literally and changes only
-# the seed.
-# ==============================================================================
+[K patience 20]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 20
+batch_size         = 64
+seed               = 1337
+
+
+[K weight decay 0.0]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.0
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[K weight decay 0.1]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.1
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+
+# =============================================================================
+# Seed stability for the frozen candidate. These must stay a literal copy of M
+# with seed as the only difference; tests/test_run_declared.py asserts that
+# changed_fields(M, S) == ("seed",). If M is regenerated, regenerate these too.
+#   python -m src.model.run_declared --prefix "S selected"
+# =============================================================================
 
 [S selected seed 7]
-d_model  = 96
-n_layers = 2
-seed = 7
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 7
 
 [S selected seed 99]
-d_model  = 96
-n_layers = 2
-seed = 99
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 99
 
-# ==============================================================================
-# Task 8: transfer learning, same six columns as every other candidate. The text
-# is serialised as title + description + ingredients; category, allergens and
-# price_position ride along on the same tabular blocks the bar uses.
-# ==============================================================================
 
-[T frozen MiniLM]
-model = frozen
+# =============================================================================
+# W: an exploration block outside the directed story, run at Federico's request to
+# push width, depth, dropout and budget well past the limits the plan declared.
+# These are NOT single-field moves from M and they are NOT part of the ablation
+# table: they answer 'did the small architecture stop us?' and nothing else.
+#
+# Guard declared BEFORE looking: seed noise on this task is 0.0134 AP and the
+# capacity effects were ~0.006, so the best of 22 runs will look good by chance.
+# Any W run that beats M must be reconfirmed on two further seeds before it may
+# replace M. Reported as a search, with its multiplicity stated.
+#   python -m src.model.run_declared --prefix "W "
+# =============================================================================
+
+[W width 128]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 128
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W width 192]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 192
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W width 256]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W depth 4]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 4
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W depth 6]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 6
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W dropout 0.0]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.0
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W dropout 0.2]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.2
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W dropout 0.3]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.3
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W dropout 0.5]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.5
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W epochs 200 patience 30]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 64
+seed               = 1337
+
+
+[W epochs 200 patience 50]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 50
+batch_size         = 64
+seed               = 1337
+
+
+[W batch 32]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 32
+seed               = 1337
+
+
+[W batch 128]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 128
+seed               = 1337
+
+
+[W lr 2e-4]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 2e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W lr 5e-4]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 5e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W width 128 heads 8]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 128
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W width 256 heads 8]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+
+[W big 128x3]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 128
+n_layers           = 3
+n_heads            = 8
+dropout            = 0.2
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 64
+seed               = 1337
+
+
+[W big 256x4]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 4
+n_heads            = 8
+dropout            = 0.3
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 64
+seed               = 1337
+
+
+[W big 192x6]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 192
+n_layers           = 6
+n_heads            = 8
+dropout            = 0.2
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 32
+seed               = 1337
+
+
+[W big 256x2 wide shallow]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 2
+n_heads            = 8
+dropout            = 0.2
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 64
+seed               = 1337
+
+
+[W big 64x6 deep narrow]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 6
+n_heads            = 4
+dropout            = 0.2
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-4
+weight_decay       = 0.01
+epochs             = 200
+patience           = 30
+batch_size         = 64
+seed               = 1337
+
+
+
+# =============================================================================
+# Z: the pre-declared confirmation of the one W run that beat M by the paired
+# margin. The rule was fixed BEFORE the sweep was read: with 22 draws and 0.0134
+# of seed noise, the best of them looks good by chance, so it may not replace M
+# until it reproduces on two further seeds. If the lr 2e-4 advantage is real it
+# survives here; if it was the maximum of a noisy search, it collapses.
+#   python -m src.model.run_declared --prefix "Z "
+# =============================================================================
+
+[Z lr 2e-4 seed 7]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 2e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 7
+
+[Z lr 2e-4 seed 99]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 2e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 99
+
+[Z width256 heads8 seed 7]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 7
+
+[Z width256 heads8 seed 99]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 99
+
+# =============================================================================
+# N: the promoted finalist. Identical to [W width 256 heads 8], which is the one
+# exploration run that survived the pre-declared confirmation: three seeds at
+# 0.7799 / 0.7731 / 0.7871, mean 0.7800 against M's 0.7568, and a seed spread of
+# 0.0070 that is no worse than M's 0.0073.
+#
+# It did NOT come from the directed path -- that path capped d_model at 96 and
+# produced M. N comes from the 22-run exploration block, so the write-up reports
+# both: what a 15-run directed search bought, and what 22 more runs bought on top
+# (+0.0233 AP for 12x the parameters). M stays declared and stays in the ladder.
+#
+# The name differs from W's, so the digest differs and this trains once. Same
+# config and seed must reproduce W width 256 heads 8 exactly.
+# =============================================================================
+
+[N selected after wide exploration]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 1337
+
+# =============================================================================
+# Y: smaller steps with a budget that matches them, aimed at N rather than M.
+#
+# K lr 3e-5 was NOT truncated on M -- it stopped at epoch ~22 of 60 -- so lowering
+# the rate there was a real loss, not a starved run. N is the opposite case: at
+# 975k parameters and lr 1e-4 it stops at epoch 3-8 with train AP 0.843, which is
+# a model taking steps too large for its size. These runs give it a third to a
+# fifth of the step and five times the budget.
+#
+# Same confirmation guard as the W block: nothing here replaces N until it
+# reproduces on seeds 7 and 99.
+#   python -m src.model.run_declared --prefix "Y "
+# =============================================================================
+
+[Y N lr 5e-5 long]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 5e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 1337
+
+[Y N lr 3e-5 long]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 1337
+
+[Y N lr 2e-5 longer]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 2e-5
+weight_decay       = 0.01
+epochs             = 400
+patience           = 60
+batch_size         = 64
+seed               = 1337
+
+[Y M lr 3e-5 long]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 3e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 1337
+
+# =============================================================================
+# Z2: same confirmation rule applied to the Y block. Y N lr 5e-5 long is only a
+# tie-break against N (+0.0056, wins one fold of five), but its lr curve has the
+# shape of a real optimum -- monotone up from 2e-5 to 5e-5, down at 1e-4 -- and it
+# is the most stable run in the whole project (sd 0.0094). Confirm before deciding.
+#   python -m src.model.run_declared --prefix "Z2 "
+# =============================================================================
+
+[Z2 N lr 5e-5 seed 7]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 5e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 7
+
+[Z2 N lr 5e-5 seed 99]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 5e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 99
+
+# =============================================================================
+# P: the promoted finalist. Same architecture as N, with the step size matched to
+# the model's size and the budget matched to the step.
+#
+# Promoted by the declared tie-break, applied literally: over three seeds it has
+# the higher mean (0.7809 vs 0.7800) and the lower spread (0.0067 vs 0.0070). The
+# mean gain is only +0.0009 and would not clear an effect-size floor -- but the
+# rule as declared has no such floor, and applying it only when the number looks
+# big enough would be choosing the criterion after seeing the result.
+#
+# What it actually buys is consistency, and that part is unambiguous: fold-to-fold
+# spread of 0.0119 against N's 0.0250, and it wins on that in 3 of 3 seeds. It
+# costs about 4x N's training time.
+#
+# The four other tie-breaks recorded in this file (K patience 20, W epochs 200 x2,
+# W big 256x4) were against M and all sit below N, so they never competed for the
+# current incumbent and are not promoted.
+#
+# Seeds 7 and 99 are already recorded as [Z2 N lr 5e-5 seed 7 / 99].
+# =============================================================================
+
+[P selected with matched budget]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 256
+n_layers           = 1
+n_heads            = 8
+dropout            = 0.1
+positional         = none
+pooling            = mean
+numeric_embedding  = buckets
+learning_rate      = 5e-5
+weight_decay       = 0.01
+epochs             = 300
+patience           = 40
+batch_size         = 64
+seed               = 1337
+
+# =============================================================================
+# FINALISTA del protocolo de tres semillas y regla de mayor media.
+#
+# La arquitectura la eligio el bracket adaptativo: los cinco ejes cerraron con
+# optimo interior, ninguno topo contra el limite de su escalera.
+#   numerico piecewise . 2 capas . d_model 96 . 4 heads . dropout 0.3 . lr 2e-4
+#
+# La semilla es la 99, la mejor de las tres en validacion cruzada. Elegir la
+# semilla por CV es una decision de despliegue legitima -- hay que desplegar un
+# modelo concreto -- y el holdout da una estimacion insesgada de ESE modelo.
+# Lo que no corresponde es citar su AP de CV (0.7811) como el rendimiento
+# esperado de la arquitectura: eso es 0.7768, la media de las tres semillas, y
+# 0.7811 es el maximo de tres sorteos.
+#
+# La autoatencion de esta red aporta +0.0177 AP sobre la misma configuracion con
+# n_layers=0, medido en tres semillas (architecture/attention-ablation.json).
+# =============================================================================
+
+[FINAL bracket d96 L2 h4 piecewise do0.3 lr2e-4 seed99]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 96
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.3
+positional         = none
+pooling            = mean
+numeric_embedding  = piecewise
+learning_rate      = 2e-4
+weight_decay       = 0.01
+epochs             = 60
+patience           = 10
+batch_size         = 64
+seed               = 99
+
+# =============================================================================
+# Transfer, reported as a secondary comparison and never inside the selection of
+# M. Both keep the full contract: the text is serialised as
+# title + description + ingredients, and the categorical and numeric columns are
+# added by the mechanism each regime documents in src/model/pretrained.py.
+#
+# Frozen runs five folds. Fine-tuning runs one (Transfer.finetune_folds = 1) and
+# must be reported as one fold, never averaged against the five-fold rows.
+# =============================================================================
+
+[T frozen MiniLM and tabular]
+model              = frozen
 
 [T finetuned MiniLM]
-model = finetune
+model              = finetune

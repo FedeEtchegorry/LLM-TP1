@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import ClassVar
 
 PARAMETERS_PATH = Path("parameters.txt")
+EDA_PARAMETERS = Path("parameters-eda.txt")
 
 LOGISTIC = "logistic"
 TRANSFORMER = "transformer"

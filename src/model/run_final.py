@@ -43,7 +43,7 @@ import pandas as pd
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import (
-    PARAMETERS_PATH,
+    EDA_PARAMETERS,
     PROTOCOL,
     TRAINING,
     TRANSFORMER,
@@ -80,7 +80,7 @@ FLAT_RESPONSE = 0.005
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument(
         "--final", "--final-results", dest="final", type=str, default=str(FINAL_DIR)

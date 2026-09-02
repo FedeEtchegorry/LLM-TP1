@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.model.configs import PARAMETERS_PATH, RunConfig, load_parameters
+from src.model.configs import EDA_PARAMETERS, RunConfig, load_parameters
 from src.model.eda_contract import (
     BRACKET_RUNS,
     CONTRACT_FIELDS,
@@ -239,7 +239,7 @@ def render_audit(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--strict", action="store_true", help="fail on incomplete evidence")
