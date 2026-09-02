@@ -26,8 +26,10 @@ BASE_ALIAS = {
     "L0 linear raw EDA": "A",
     "L1 learned embeddings, no attention": "B",
     "L2 learned embeddings with attention": "C",
-    "L0b linear, extracted key only": "A (sin texto, + clave extraída)",
     "M selected from directed comparisons": "C*",
+    "FINAL bracket d96 L2 h4 piecewise do0.3 lr2e-4 seed99": "C*",
+    "L0* lineal (tf-idf, 453 params)": "A",
+    "L0* swept-best linear": "A",
 }
 
 FIELD_LABEL = {

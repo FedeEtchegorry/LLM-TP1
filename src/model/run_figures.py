@@ -11,6 +11,8 @@ recorded yet is skipped, with the missing run named, rather than trained on the 
 
 from __future__ import annotations
 
+import json
+
 import argparse
 from pathlib import Path
 
@@ -40,6 +42,8 @@ from src.model.diagnostics import (
 )
 from src.model import figures as fig
 from src.model.experiment import partition
+from src.model.model_alias import alias_label
+from src.model.protocol import EvaluationResult, FoldScore
 from src.model.results import (
     RESULTS_DIR,
     fold_frame,
@@ -103,11 +107,19 @@ def report_missing(name: str, reasons: list[str]) -> None:
 
 
 def best_recorded(declared: dict[str, RunConfig], directory: str) -> RunConfig | None:
-    """The declared configuration with the best cross-validated AP, or ``None``.
+    """El finalista congelado, no el mejor AP de todo lo declarado.
 
-    Mirrors ``run_final.select`` but returns rather than raising, so a figure that
-    needs it can be reported as missing instead of aborting the whole run.
+    Antes se ordenaba por AP entre las secciones declaradas, y eso elegía
+    ``L0b linear, extracted key only``: la cota diagnóstica que recibe la frase de
+    popularidad ya extraída a mano. Es la de mayor AP del archivo por construcción, y
+    justamente por eso nunca fue candidata. El finalista lo declara ``FINALISTS`` antes
+    de abrir el holdout, y es el único que corresponde dibujar.
     """
+    from src.model.eda_contract import FINALISTS
+
+    for name in FINALISTS:
+        if name in declared:
+            return declared[name]
     summary = summary_frame(directory)
     if summary.empty:
         return None
@@ -117,19 +129,51 @@ def best_recorded(declared: dict[str, RunConfig], directory: str) -> RunConfig |
     ranked = eligible.sort_values("average_precision_mean", ascending=False)
     return declared[ranked.iloc[0]["name"]]
 
-
 def cached_test(config: RunConfig, directory: str) -> tuple | None:
-    """The stored holdout result and predictions for this config, or ``None``.
+    """El holdout guardado para esta configuración, buscado por CONFIGURACIÓN.
 
-    Reads only what ``run_final`` already wrote; a config with no such record is not
-    drawable yet, not a reason to score the holdout here.
+    Buscar por digest deja de funcionar apenas cambia la fórmula que lo calcula, y
+    eso ya pasó: un commit sacó el nombre de sección del hash -- un arreglo correcto,
+    porque evitaba entrenar la misma red dos veces con dos nombres -- y con eso los
+    archivos guardados quedaron con nombres que la fórmula nueva no reproduce. Los
+    resultados están intactos; lo que se rompió es el índice.
+
+    Comparar la configuración almacenada contra la pedida no depende de ninguna
+    fórmula de hash, así que encuentra la corrida con cualquiera de las dos.
     """
     result = load(config, directory)
     predicted = load_predictions(config, directory)
-    if result is None or predicted is None:
-        return None
-    return result, predicted
+    if result is not None and predicted is not None:
+        return result, predicted
 
+    from dataclasses import asdict
+
+    wanted = {k: list(v) if isinstance(v, tuple) else v
+              for k, v in asdict(config).items() if k != "name"}
+    for path in sorted(Path(directory).glob("*.json")):
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        if "config" not in stored or "folds" not in stored:
+            continue  # comparison.json y otros resumenes no son corridas
+        if {k: v for k, v in stored["config"].items() if k != "name"} != wanted:
+            continue
+        npy = path.with_suffix(".predictions.npy")
+        if not npy.exists():
+            continue
+        return (
+            EvaluationResult(
+                name=stored["name"],
+                folds=tuple(
+                    FoldScore(
+                        fold_index=f["fold_index"], roc_auc=f["roc_auc"],
+                        average_precision=f["average_precision"],
+                        n_train=f["n_train"], n_scored=f["n_scored"], seconds=f["seconds"],
+                    )
+                    for f in stored["folds"]
+                ),
+            ),
+            np.load(npy),
+        )
+    return None
 
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
@@ -161,12 +205,33 @@ def main(argv: list[str] | None = None) -> int:
         if cached is None:
             stage6_missing.append(f"falta la corrida final de {winner.name} (correr run_final)")
         else:
-            scores.append(Scored(winner.name, actual, np.asarray(cached[1], dtype=float)))
+            scores.append(Scored(alias_label(winner.name), actual, np.asarray(cached[1], dtype=float)))
 
     if bar_config is not None and (winner is None or bar_config.name != winner.name):
         cached = cached_test(bar_config, final_dir)
         if cached is not None:
-            scores.append(Scored(bar_config.name, actual, np.asarray(cached[1], dtype=float)))
+            scores.append(Scored(alias_label(bar_config.name), actual, np.asarray(cached[1], dtype=float)))
+
+    # A -- el lineal que compitio contra C* -- no se dibuja aca por decision explicita:
+    # estas figuras muestran C* contra la cota A*, y la comparacion entre finalistas
+    # vive en ``final/comparison.json``. Para devolverlo, leer sus predicciones de
+    # ``final/linear-predictions.npz`` y sumarlo a ``scores`` antes de la cota.
+
+    # A*, la cota diagnostica: la logistica sin texto crudo pero con
+    # ``popularity_phrase`` extraida a mano. No compitio y nada se eligio con ella. Va
+    # ultima para que ``scores[0]`` siga siendo el finalista.
+    techo = next((run for name, run in declared.items() if name.startswith("L0b")), None)
+    if techo is not None:
+        cached = cached_test(techo, final_dir)
+        if cached is None:
+            print(
+                "  [aviso] A* no tiene holdout registrado "
+                "(correr src.model.run_ceiling_holdout); las 09 salen sin la cota"
+            )
+        else:
+            scores.append(
+                Scored(alias_label(techo.name), actual, np.asarray(cached[1], dtype=float))
+            )
 
     if wanted("09-final-roc-pr", args.only):
         if stage6_missing:
@@ -187,12 +252,14 @@ def main(argv: list[str] | None = None) -> int:
         if stage6_missing:
             report_missing("09-final-calibracion", stage6_missing)
         else:
-            table = calibration(scores[0])
+            tablas = [
+                (s.name, calibration(s), calibration_error(calibration(s))) for s in scores
+            ]
             path = fig.calibration(
-                table,
-                title=f"Calibracion de [{scores[0].name}] en el test",
+                tablas,
+                title="Calibracion en el test: BTR predicho contra observado",
                 path=figures_dir / "09-final-calibracion.png",
-                error=calibration_error(table),
+                annotate=alias_label(techo.name) if techo is not None else None,
             )
             report("09-final-calibracion", path)
 

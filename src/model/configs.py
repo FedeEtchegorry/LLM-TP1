@@ -44,10 +44,10 @@ POOLINGS = ("cls", "mean", "attention")
 LADDER_NAME = re.compile(r"^L\d")
 """``[L0 ...]`` through ``[L4 ...]``: the rungs ``run_ladder`` walks, in file order."""
 
-AXIS_NAME = re.compile(r"^(?!T )[A-Z] ")
+AXIS_NAME = re.compile(r"^(?![TQ] )[A-Z] ")
 """``[B 1 layer]``, ``[C 8 heads]``, ``[K lr 3e-4]``, ...: the alternatives
-``run_modules`` sweeps. Any capital letter and a space -- except ``T``, which
-``TRANSFER_NAME`` owns, so ``[T frozen text]`` never counts as an axis point."""
+``run_modules`` sweeps. Any capital letter and a space -- except ``T`` (transfer)
+and ``Q`` (diagnostic controls), so those sections never count as axis points."""
 
 TRANSFER_NAME = re.compile(r"^T ")
 """``[T frozen text]``, ``[T finetuned]``, ...: what ``run_transfer`` walks."""

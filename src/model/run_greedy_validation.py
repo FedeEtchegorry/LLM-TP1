@@ -1,23 +1,19 @@
-"""Task 11: check whether the greedy depth -> width -> heads walk hid a better point.
+"""Whether the directed path's own order decided where it stopped.
 
-    .venv/bin/python -m src.model.run_greedy_validation --parameters parameters-eda.txt \
-        --results results/eda-contract \
-        --output results/eda-contract/architecture/greedy-validation.json
+    .venv/Scripts/python -m src.model.run_greedy_validation \
+        --parameters parameters-eda.txt --results results/eda-contract
 
-Must run **after** Task 6 (M chosen) and **before** Task 7 Step 6 (the holdout opens).
-Two biases are checked, in order:
+Task 5 walks depth, then width, then heads, resolving each axis against the winner
+of the previous one.  That visits seven of twenty-seven capacity points and admits
+two biases the write-up cannot claim to have avoided without measuring them:
 
-1. **Conditioning bias** -- width and heads were only ever tried at the depth the
-   greedy walk kept; ``depth_probe`` reopens the depth it discarded and tries the two
-   widths and two head counts there.
-2. **Order bias** -- the final point depends on having walked depth before width;
-   ``capacity_neighbourhood`` tries every single-coordinate move on the three capacity
-   axes from the point the greedy walk actually landed on.
+    conditioning  width and heads were never tried at the depth the path dropped
+    ordering      the end point may describe the route rather than the model
 
-The validation only ever demands ``improves`` -- never ``tie-break`` -- to promote a
-probe over the selected configuration: a tie-break is a cheap, reversible move during
-the search, but M is already frozen here, and flipping the finalist on a difference
-the margin cannot resolve would be changing candidates by noise.
+Layer 1 reopens the discarded depth and crosses it with every width and head count.
+Layer 2 takes one single-coordinate step on each capacity axis from the selected
+point.  Both read only cross-validation; neither touches the holdout, and neither
+promotes anything by itself -- the plan's decision rule does that.
 """
 
 from __future__ import annotations
@@ -30,15 +26,46 @@ from pathlib import Path
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import PARAMETERS_PATH, PROTOCOL, RunConfig, changed_fields, load_parameters
+from src.model.configs import PARAMETERS_PATH, RunConfig, ladder_runs, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one
 from src.model.representation_selection import compare, paired_margin
 from src.model.results import RESULTS_DIR
-from src.model.run_architecture import DEPTHS, HEADS, WIDTHS, depth_candidates, head_candidates, width_candidates
+from src.model.run_architecture import (
+    ARCHITECTURE_DIR,
+    FINAL_NAME,
+    HEADS,
+    SELECTION_FILE,
+    WIDTHS,
+    ap_scores,
+    depth_candidates,
+    head_candidates,
+    numeric_candidates,
+    width_candidates,
+)
 
-M_NAME = "M selected from directed comparisons"
+VALIDATION_FILE = "greedy-validation.json"
+CAPACITY_AXES = ("n_layers", "d_model", "n_heads")
+
+
+def architecture_base(declared: dict[str, RunConfig], selection: dict) -> RunConfig:
+    """The point Task 5 walked the capacity axes from, named exactly as it named it.
+
+    The path resolves the numeric embedding before touching depth, so the base is
+    L2 when that stage kept its base and the winning ``A numeric ...`` run when it
+    moved.  Rebuilding it through ``numeric_candidates`` rather than by hand is what
+    makes every cached digest line up: a configuration under a different name is a
+    different digest and would retrain.
+    """
+    l2 = ladder_runs(declared)
+    base = next(run for name, run in l2.items() if name.startswith("L2"))
+    chosen = selection["numeric_embedding"]["selected"]
+    if chosen == base.numeric_embedding:
+        return base
+    return next(
+        run for run in numeric_candidates(base) if run.numeric_embedding == chosen
+    )
 
 
 def alternate_depth(selected: RunConfig) -> int:
@@ -46,13 +73,17 @@ def alternate_depth(selected: RunConfig) -> int:
     return 1 if selected.n_layers == 2 else 2
 
 
-def depth_anchor(selected: RunConfig) -> RunConfig:
+def depth_anchor(selected: RunConfig, base: RunConfig) -> RunConfig:
+    """The alternate-depth point, named exactly as Task 5 would have named it."""
     depth = alternate_depth(selected)
-    return replace(selected, name=f"V anchor depth {depth}", n_layers=depth)
+    if depth == base.n_layers:
+        return base
+    return replace(base, name=f"B depth {depth}", n_layers=depth)
 
 
-def depth_probe(selected: RunConfig) -> list[RunConfig]:
-    anchor = depth_anchor(selected)
+def depth_probe(selected: RunConfig, base: RunConfig) -> list[RunConfig]:
+    """Every width and head count at the depth the path abandoned: four new runs."""
+    anchor = depth_anchor(selected, base)
     probes = [
         replace(anchor, name=f"V depth {anchor.n_layers} d_model {width}", d_model=width)
         for width in WIDTHS
@@ -67,61 +98,96 @@ def depth_probe(selected: RunConfig) -> list[RunConfig]:
 
 
 def capacity_neighbourhood(selected: RunConfig) -> list[RunConfig]:
-    """Every single-coordinate move on the three capacity axes, from the final point."""
-    moves = [
-        replace(selected, name=f"V neighbour n_layers {value}", n_layers=value)
-        for value in DEPTHS
-        if value != selected.n_layers
-    ]
-    moves += [
-        replace(selected, name=f"V neighbour d_model {value}", d_model=value)
-        for value in WIDTHS
-        if value != selected.d_model
-    ]
-    moves += [
-        replace(selected, name=f"V neighbour n_heads {value}", n_heads=value)
-        for value in HEADS
-        if value != selected.n_heads
-    ]
-    return moves
+    """Every single-coordinate move on the three capacity axes, from the final point.
+
+    No generators of its own on purpose: reusing Task 5's means that when the greedy
+    never moved, every point here is name-for-name what Task 5 already trained, so
+    the digests match and the whole layer resolves from cache.
+    """
+    return (
+        depth_candidates(selected)
+        + width_candidates(selected)
+        + head_candidates(selected)
+    )
 
 
-def verdict(selected_ap: np.ndarray, probes: list[tuple[RunConfig, np.ndarray]]) -> list[dict]:
+def verdict(
+    selected_ap: np.ndarray, probes: list[tuple[RunConfig, np.ndarray]]
+) -> list[dict]:
+    """Probes that beat the frozen candidate by the declared paired margin.
+
+    Deliberately asymmetric: ``improves`` counts and ``tie-break`` does not.  While
+    the path was still searching, a tie-break was a cheap, reversible move; here M
+    is already frozen, and overturning it on a difference the margin cannot resolve
+    would be changing finalists on noise.
+    """
     better = []
     for run, ap in probes:
-        mean, low, high = paired_margin(ap - selected_ap)
+        mean, low, high = paired_margin(np.asarray(ap, dtype=float) - selected_ap)
         if compare(selected_ap, ap) == "improves":
             better.append({"name": run.name, "delta": mean, "low": low, "high": high})
     return better
 
 
-def all_deltas(selected_ap: np.ndarray, probes: list[tuple[RunConfig, np.ndarray]]) -> list[dict]:
-    """Every probe's delta against the selected configuration, win or not -- for
-    reporting the full neighbourhood (chart 4), not just the (usually empty) winners
-    ``verdict`` returns."""
-    rows = []
-    for run, ap in probes:
-        mean, low, high = paired_margin(ap - selected_ap)
-        rows.append({"name": run.name, "delta": mean, "low": low, "high": high})
-    return rows
+def validation_path(results: Path | str) -> Path:
+    return Path(results) / ARCHITECTURE_DIR / VALIDATION_FILE
 
 
-def _ap(config: RunConfig, frame, partitions, directory: str, cache: dict) -> tuple[np.ndarray, bool]:
-    """Score ``config``, and say whether it came from the cache (by digest)."""
-    was_cached = config.digest in cache
-    result, note = run_one(config, frame, partitions, directory=directory)
-    ap = np.array([fold.average_precision for fold in result.folds], dtype=float)
-    cache[config.digest] = ap
-    return ap, note == "recorded"
+def read_selection(results: Path | str) -> dict:
+    path = Path(results) / ARCHITECTURE_DIR / SELECTION_FILE
+    if not path.exists():
+        raise SystemExit(
+            f"{path} is missing -- run src.model.run_architecture before validating it"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
+def _run_all(
+    configs: list[RunConfig], frame, partitions, results: Path | str, force: bool
+) -> tuple[list[tuple[RunConfig, np.ndarray]], int, int]:
+    """Score every configuration, reporting how many were trained and how many cached."""
+    scored: list[tuple[RunConfig, np.ndarray]] = []
+    trained = cached = 0
+    for config in configs:
+        result, note = run_one(
+            config, frame, partitions, directory=results, force=force
+        )
+        if note == "recorded":
+            cached += 1
+        else:
+            trained += 1
+        print(f"  {config.name}: {result.summary_row()} [{note}]", flush=True)
+        scored.append((config, ap_scores(result)))
+    return scored, trained, cached
+
+
+def _layer(
+    title: str,
+    selected_ap: np.ndarray,
+    configs: list[RunConfig],
+    frame,
+    partitions,
+    results: Path | str,
+    force: bool,
+) -> tuple[dict, list[tuple[RunConfig, np.ndarray]]]:
+    print(f"\n=== {title} ===")
+    scored, trained, cached = _run_all(configs, frame, partitions, results, force)
+    return (
+        {
+            "trained": trained,
+            "cached": cached,
+            "better_than_selected": verdict(selected_ap, scored),
+        },
+        scored,
+    )
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
-    parser.add_argument(
-        "--output", type=str, default="results/eda-contract/architecture/greedy-validation.json"
-    )
+    parser.add_argument("--output", type=str, default="")
+    parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -130,70 +196,70 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
     require_valid(declared)
-    selected = declared[M_NAME]
+    selection = read_selection(args.results)
 
-    frame = load_dataset(PROTOCOL.dataset)
+    selected = declared[FINAL_NAME]
+    base = architecture_base(declared, selection)
+
+    frame = load_dataset()
     partitions = partition(frame)
     describe(frame, partitions)
 
-    cache: dict[str, np.ndarray] = {}
-    selected_ap, _ = _ap(selected, frame, partitions, args.results, cache)
+    print(f"\nvalidating [{selected.name}] against the path that produced it")
+    result, note = run_one(selected, frame, partitions, directory=args.results)
+    selected_ap = ap_scores(result)
+    print(f"  {selected.name}: {result.summary_row()} [{note}]")
 
-    print("\n=== LAYER 1: DEPTH PROBE (reopens the discarded depth) ===")
-    probes_1 = depth_probe(selected)
-    trained_1, cached_1 = 0, 0
-    results_1: list[tuple[RunConfig, np.ndarray]] = []
-    for probe in probes_1:
-        ap, was_cached = _ap(probe, frame, partitions, args.results, cache)
-        trained_1 += 0 if was_cached else 1
-        cached_1 += 1 if was_cached else 0
-        results_1.append((probe, ap))
-    better_1 = verdict(selected_ap, results_1)
-
-    print("\n=== LAYER 2: SINGLE-COORDINATE NEIGHBOURHOOD ===")
-    moves = capacity_neighbourhood(selected)
-    trained_2, cached_2 = 0, 0
-    results_2: list[tuple[RunConfig, np.ndarray]] = []
-    for move in moves:
-        ap, was_cached = _ap(move, frame, partitions, args.results, cache)
-        trained_2 += 0 if was_cached else 1
-        cached_2 += 1 if was_cached else 0
-        results_2.append((move, ap))
-    better_2 = verdict(selected_ap, results_2)
-
-    stable = not better_1 and not better_2
-    conclusion = (
-        "no probe at the unexplored depth and no single-coordinate move beat the "
-        "selected configuration by the declared paired margin"
-        if stable
-        else "at least one probe beat the selected configuration by the declared paired margin"
+    anchor = depth_anchor(selected, base)
+    layer_1, _ = _layer(
+        f"LAYER 1: THE DEPTH THE PATH DROPPED ({anchor.n_layers} blocks)",
+        selected_ap,
+        [anchor] + depth_probe(selected, base),
+        frame,
+        partitions,
+        args.results,
+        args.force,
     )
+    layer_1["anchor_depth"] = anchor.n_layers
 
+    layer_2, _ = _layer(
+        "LAYER 2: ONE COORDINATE AWAY FROM THE SELECTED POINT",
+        selected_ap,
+        capacity_neighbourhood(selected),
+        frame,
+        partitions,
+        args.results,
+        args.force,
+    )
+    layer_2["axes"] = list(CAPACITY_AXES)
+
+    better = layer_1["better_than_selected"] + layer_2["better_than_selected"]
+    stable = not better
     document = {
         "selected": selected.name,
-        "layer_1_depth_probe": {
-            "anchor_depth": alternate_depth(selected),
-            "trained": trained_1,
-            "cached": cached_1,
-            "better_than_selected": better_1,
-            "all_probes": all_deltas(selected_ap, results_1),
-        },
-        "layer_2_neighbourhood": {
-            "axes": ["n_layers", "d_model", "n_heads"],
-            "trained": trained_2,
-            "cached": cached_2,
-            "better_than_selected": better_2,
-            "all_probes": all_deltas(selected_ap, results_2),
-        },
+        "layer_1_depth_probe": layer_1,
+        "layer_2_neighbourhood": layer_2,
         "stable": stable,
-        "conclusion": conclusion,
+        "conclusion": (
+            "no probe at the unexplored depth and no single-coordinate move beat the "
+            "selected configuration by the declared paired margin"
+            if stable
+            else "a probe beat the selected configuration by the declared paired "
+            "margin: " + ", ".join(entry["name"] for entry in better)
+        ),
     }
-
-    path = Path(args.output)
+    path = Path(args.output) if args.output else validation_path(args.results)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
-    print(f"\n{document}")
-    print(f"\nwritten to {path}")
+    path.write_text(
+        json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+    print(
+        f"\ntrained {layer_1['trained'] + layer_2['trained']}, "
+        f"cached {layer_1['cached'] + layer_2['cached']}, holdout untouched"
+    )
+    print(f"stable: {stable} -- {document['conclusion']}")
+    print(f"verdict written to {path}")
     return 0
 
 

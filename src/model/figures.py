@@ -168,50 +168,94 @@ def roc_and_pr(
     return _save(figure, path)
 
 
-def calibration(table: pd.DataFrame, *, title: str, path: Path, error: float) -> Path:
+def calibration(
+    table, *, title: str, path: Path, error: float | None = None,
+    annotate: str | None = None,
+) -> Path:
     """Predicted BTR against observed BTR, with the perfect diagonal for reference.
 
     ``BTR`` is the mean of the predicted probability, so this is the business metric
     itself and not a stand-in for it. A point above the diagonal is a bin the model
     over-promises on.
+
+    ``table`` is either one decile table -- the historical call, which still needs its
+    ``error`` -- or a list of ``(name, table, error)`` to draw several models on the
+    same axes. Comparing calibration across models only means something on shared
+    axes: the question is which curve sits closer to the diagonal, and two figures
+    side by side with their own limits cannot answer it.
+
+    ``annotate`` nombra la unica serie que lleva los numeros de decil: las tres
+    comparten los cortes, asi que rotular una alcanza y rotular las tres tapa los
+    puntos que se comparan.
     """
+    if isinstance(table, pd.DataFrame):
+        if error is None:
+            raise ValueError("una sola tabla necesita su error de calibracion")
+        series = [(None, table, error)]
+    else:
+        series = list(table)
+        if not series:
+            raise ValueError("no hay ninguna tabla que dibujar")
+
     figure, axes = plt.subplots(figsize=FIGSIZE)
-    limit = float(max(table["predicted"].max(), table["observed"].max(), 0.05)) * 1.1
+    limit = max(
+        float(max(each["predicted"].max(), each["observed"].max()))
+        for _, each, _ in series
+    ) * 1.1
+    limit = max(limit, 0.055)
 
     axes.plot([0, limit], [0, limit], color=NEUTRAL, linestyle="--", linewidth=1,
               label="calibracion perfecta")
-    axes.errorbar(
-        table["predicted"],
-        table["observed"],
-        # Wilson's interval is not centred on the raw rate, so a bin at 0% or 100%
-        # lands on its own bound and rounding can push the arm a hair below zero.
-        yerr=[
-            (table["observed"] - table["low"]).clip(lower=0.0),
-            (table["high"] - table["observed"]).clip(lower=0.0),
-        ],
-        fmt="o",
-        color=MODEL_COLOR,
-        ecolor=MODEL_COLOR,
-        elinewidth=1.2,
-        capsize=3,
-        markersize=7,
-        label="decil de score (IC Wilson 95%)",
-    )
-    for _, row in table.iterrows():
-        axes.annotate(
-            f"{int(row['bin'])}",
-            xy=(row["predicted"], row["observed"]),
-            xytext=(6, -10),
-            textcoords="offset points",
-            fontsize=8,
-            color=MODEL_COLOR,
+    for position, (name, each, own_error) in enumerate(series):
+        colour = MODEL_COLOR if len(series) == 1 else PALETTE[position % len(PALETTE)]
+        etiqueta = "decil de score (IC Wilson 95%)" if name is None else name
+        if own_error is not None:
+            etiqueta += f" — error {own_error:.4f}"
+        axes.errorbar(
+            each["predicted"],
+            each["observed"],
+            yerr=[
+                (each["observed"] - each["low"]).clip(lower=0.0),
+                (each["high"] - each["observed"]).clip(lower=0.0),
+            ],
+            fmt="o-" if len(series) > 1 else "o",
+            color=colour,
+            ecolor=colour,
+            elinewidth=1.2,
+            linewidth=1.2,
+            capsize=3,
+            markersize=7,
+            label=etiqueta,
         )
+        rotula = (name == annotate) if annotate is not None else (len(series) == 1)
+        if rotula:
+            # Los deciles se apilan en columna cuando los puntos se pisan: la
+            # distribucion de scores es bimodal y ocho de los diez caen sobre el
+            # origen, a menos de un pixel entre si.
+            paso, base = 12.0, 7.0
+            anterior, escalon = None, 0
+            for _, row in each.sort_values("predicted").iterrows():
+                x = float(row["predicted"])
+                escalon = escalon + 1 if anterior is not None and x - anterior < limit * 0.04 else 0
+                anterior = x
+                # Contra el borde derecho el rotulo se sale del marco: va a la izquierda.
+                dx = -15 if x > limit * 0.75 else 7
+                axes.annotate(
+                    f"{int(row['bin'])}",
+                    xy=(x, row["observed"]),
+                    xytext=(dx, base + escalon * paso),
+                    textcoords="offset points",
+                    fontsize=8,
+                    color=colour,
+                )
 
     axes.set_xlim(0, limit)
     axes.set_ylim(0, limit)
     axes.set_xlabel("BTR predicho (media de p en el decil)")
     axes.set_ylabel("BTR observado en el decil")
-    axes.set_title(f"{title}   —   error de calibracion {error:.4f}")
+    axes.set_title(
+        title if len(series) > 1 else f"{title}   —   error de calibracion {series[0][2]:.4f}"
+    )
     axes.grid(alpha=0.25)
     axes.legend(loc="upper left", fontsize=9)
     _framed(axes)
@@ -955,6 +999,7 @@ ENCODING_LABELS = {
     "buckets por cuantiles": "Buckets",
     "continuo + buckets": "Affine + buckets",
     "piecewise-linear": "Piecewise",
+    "periodic": "Periodic",
 }
 """Tidy display names, aligned with the vocabulary chart 3 uses for the Transformer's
 numeric embedding (affine/buckets/piecewise) -- these are still a different
@@ -1069,8 +1114,8 @@ def one_versus_two(
 
 
 CATEGORICAL_PALETTE = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4")
-"""One distinct hue per rung, in narrative (``order``) sequence -- floor and ceiling
-included, no bar singled out as neutral."""
+"""Un tono por peldano, en el orden narrativo de ``order`` -- cotas incluidas. Si
+alguna vez hay mas filas que tonos la figura falla en lugar de repetir color."""
 
 
 def eda_ladder_waterfall(
@@ -1108,24 +1153,40 @@ def eda_ladder_waterfall(
     axes.set_facecolor("white")
     positions = np.arange(len(rows))[::-1]  # first in ``order`` drawn at the top
 
-    colours = [CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i in range(len(rows))]
+    if len(rows) > len(CATEGORICAL_PALETTE):
+        raise ValueError(
+            f"la escalera trae {len(rows)} peldanos y la paleta tiene "
+            f"{len(CATEGORICAL_PALETTE)} tonos: agregar uno antes que repetir color"
+        )
+    colours = list(CATEGORICAL_PALETTE[: len(rows)])
+    # Sin repeticiones llega ``NaN`` y no cero: sin bigote y sin "+-", porque un
+    # "+- 0.000" se lee como una precision medida.
+    spread = rows["average_precision_std"].to_numpy(dtype=float)
+    measured = ~np.isnan(spread)
     axes.barh(
-        positions,
-        rows["average_precision_mean"],
-        xerr=rows["average_precision_std"],
-        color=colours,
-        ecolor="#52514e",
-        capsize=3,
-        error_kw={"linewidth": 1.3},
-        height=0.62,
-        zorder=2,
+        positions, rows["average_precision_mean"], color=colours, height=0.62, zorder=2
     )
+    if measured.any():
+        axes.errorbar(
+            rows["average_precision_mean"].to_numpy()[measured],
+            positions[measured],
+            xerr=spread[measured],
+            fmt="none",
+            ecolor="#52514e",
+            capsize=3,
+            elinewidth=1.3,
+            zorder=3,
+        )
 
-    for y, (_, row) in zip(positions, rows.iterrows()):
+    for y, (index, row) in zip(positions, rows.iterrows()):
+        sd = spread[index]
+        shown = f"{row['average_precision_mean']:.3f}"
+        if measured[index]:
+            shown += f" ± {sd:.3f}"
         axes.text(
-            row["average_precision_mean"] + row["average_precision_std"] + 0.014,
+            row["average_precision_mean"] + (0.0 if np.isnan(sd) else sd) + 0.014,
             y,
-            f"{row['average_precision_mean']:.3f} ± {row['average_precision_std']:.3f}",
+            shown,
             va="center",
             fontsize=9,
             color="#52514e",
@@ -1173,12 +1234,17 @@ def architecture_path(stages: list[dict], *, title: str, path: Path) -> Path:
         "inconclusive": NEUTRAL,
         "loses": BAR_COLOR,
     }
-    figure, axes = plt.subplots(figsize=(WIDE[0], 0.9 * len(stages) + 1.6))
+    figure, axes = plt.subplots(figsize=(WIDE[0], 1.25 * len(stages) + 2.0))
     positions = np.arange(len(stages))[::-1]
 
     path_x: list[float] = []
     path_y: list[float] = []
     for y, stage in zip(positions, stages):
+        # Con cinco valores en un rango de AP de dos centesimas, las etiquetas se
+        # pisan si todas van a la misma altura. Se alternan dos niveles siguiendo el
+        # orden de AP, que es justo el orden en que se acercan entre si.
+        ordered = sorted(stage["points"], key=lambda p: p["ap"])
+        offsets = {id(p): (0.20 if i % 2 == 0 else 0.42) for i, p in enumerate(ordered)}
         for point in stage["points"]:
             colour = outcome_colour.get(point["outcome"], NEUTRAL)
             is_selected = point["label"] == stage["selected"]
@@ -1191,7 +1257,7 @@ def architecture_path(stages: list[dict], *, title: str, path: Path) -> Path:
                 zorder=4 if is_selected else 3,
             )
             axes.text(
-                point["ap"], y + 0.22,
+                point["ap"], y + offsets[id(point)],
                 point["label"],
                 ha="center", fontsize=7.5,
                 fontweight="bold" if is_selected else "normal",
@@ -1205,7 +1271,10 @@ def architecture_path(stages: list[dict], *, title: str, path: Path) -> Path:
     axes.set_yticks(positions)
     axes.set_yticklabels([stage["stage"] for stage in stages], fontsize=9)
     axes.set_xlabel("Average precision (media entre folds)")
-    axes.set_title(title)
+    # aire arriba: las etiquetas escalonadas llegan a y+0.42 y sin este margen
+    # la fila superior se mete en el titulo
+    axes.set_ylim(-0.7, len(stages) - 1 + 0.85)
+    axes.set_title(title, pad=14)
     axes.grid(alpha=0.2, axis="x")
     handles = [
         plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=colour, markersize=9, label=label)
@@ -1216,12 +1285,20 @@ def architecture_path(stages: list[dict], *, title: str, path: Path) -> Path:
             ("pierde", BAR_COLOR),
         )
     ]
-    axes.legend(handles=handles, loc="lower right", fontsize=8)
+    # fuera de los ejes: dentro tapaba la fila de mas abajo, que es justo
+    # donde caen los puntos del ultimo eje del recorrido
+    axes.legend(
+        handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.12),
+        ncol=len(handles), fontsize=8, frameon=False,
+    )
     figure.tight_layout()
     return _save(figure, path)
 
 
-def architecture_grid(stages: list[dict], *, title: str, path: Path) -> Path:
+def architecture_grid(
+    stages: list[dict], *, title: str, path: Path,
+    value_label: str = "Average precision",
+) -> Path:
     """One subplot per capacity axis (embedding numerico, profundidad, ancho,
     heads), all in a single figure: every candidate at that axis as a horizontal
     bar by AP, one distinct colour per bar, the axis's winner outlined, the exact
@@ -1235,8 +1312,13 @@ def architecture_grid(stages: list[dict], *, title: str, path: Path) -> Path:
     """
     columns = 2
     grid_rows = -(-len(stages) // columns)
-    figure, grid = plt.subplots(grid_rows, columns, figsize=(WIDE[0], 3.4 * grid_rows))
+    alto_fila = max(2.1, 0.62 * max(len(s["points"]) for s in stages) + 1.5)
+    figure, grid = plt.subplots(
+        grid_rows, columns, figsize=(WIDE[0], alto_fila * grid_rows)
+    )
     panels = np.atleast_1d(grid).ravel()
+    for sobrante in panels[len(stages):]:
+        sobrante.set_axis_off()
 
     for panel, stage in zip(panels, stages):
         points = stage["points"]
@@ -1266,11 +1348,15 @@ def architecture_grid(stages: list[dict], *, title: str, path: Path) -> Path:
             )
         panel.set_yticks(positions)
         panel.set_yticklabels([point["label"] for point in points], fontsize=8.5)
-        panel.set_xlabel("Average precision", fontsize=9)
+        panel.set_xlabel(value_label, fontsize=9)
         panel.set_title(stage["stage"][:1].upper() + stage["stage"][1:], fontsize=10.5)
         panel.grid(alpha=0.15, axis="x")
         panel.set_axisbelow(True)
         panel.margins(x=0.22)
+        # la etiqueta del valor se dibuja en coordenadas de datos al final de
+        # la barra: sin este aire a la derecha se sale del area del panel
+        izq, der = panel.get_xlim()
+        panel.set_xlim(izq, der + 0.42 * (der - izq))
         for spine in panel.spines.values():
             spine.set_visible(True)
             spine.set_color("#52514e")
@@ -1352,7 +1438,12 @@ def final_candidates_bar(rows: list[dict], *, title: str, path: Path) -> Path:
     figure, axes = plt.subplots(figsize=(7, 4.5))
     positions = np.arange(len(rows))
     heights = [row["ap"] for row in rows]
-    colours = [CATEGORICAL_PALETTE[i % len(CATEGORICAL_PALETTE)] for i in range(len(rows))]
+    if len(rows) > len(CATEGORICAL_PALETTE):
+        raise ValueError(
+            f"la escalera trae {len(rows)} peldanos y la paleta tiene "
+            f"{len(CATEGORICAL_PALETTE)} tonos: agregar uno antes que repetir color"
+        )
+    colours = list(CATEGORICAL_PALETTE[: len(rows)])
 
     axes.bar(positions, heights, color=colours, zorder=2)
     for x, row in zip(positions, rows):

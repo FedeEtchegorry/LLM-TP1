@@ -51,8 +51,7 @@ from src.model.configs import (
     load_parameters,
 )
 from src.model.console import utf8_console
-from src.model.eda_contract import FINALISTS, require_valid
-from src.model.model_alias import alias_label
+from src.model.eda_contract import FINALISTS
 from src.model.diagnostics import (
     Scored,
     bucket_embedding_axis,
@@ -83,7 +82,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
-    parser.add_argument("--final", type=str, default=str(FINAL_DIR))
+    parser.add_argument(
+        "--final", "--final-results", dest="final", type=str, default=str(FINAL_DIR)
+    )
     parser.add_argument("--figures", type=str, default=str(FIGURES_DIR))
     parser.add_argument(
         "--config",
@@ -99,16 +100,34 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def finalists(declared: dict[str, RunConfig]) -> list[RunConfig]:
+    """The frozen finalist list, ordered as the holdout scores it.
+
+    ``FINALISTS`` is declared in ``eda_contract`` before any holdout run and is
+    never re-ranked here.  That is the whole point: ``L0b``, a diagnostic bracket
+    that receives the hand-extracted popularity phrase, has the highest recorded
+    AP of any run in the family, so a sort by cross-validated AP would promote it
+    to the holdout.  A parameter file that declares every finalist gets this list;
+    one that does not -- the historical ``parameters.txt`` -- keeps ``select``.
+
+    The model comes first because the diagnostics below read ``scores[0]``; the
+    linear bar follows it.
+    """
+    if any(name not in declared for name in FINALISTS):
+        return []
+    runs = [declared[name] for name in FINALISTS]
+    return [run for run in runs if not run.name.startswith(BAR)] + [
+        run for run in runs if run.name.startswith(BAR)
+    ]
+
+
 def select(
-    declared: dict[str, RunConfig], directory: str, *, restrict_to: tuple[str, ...] | None = None
+    declared: dict[str, RunConfig], directory: str
 ) -> tuple[RunConfig, pd.DataFrame]:
     """The declared run with the best cross-validated AP, and the table it came from.
 
     Only declared sections are eligible: a record left over from a parameter file that
-    has since changed is history, not a candidate. When ``restrict_to`` is given (the
-    ``FINALISTS`` tuple, under the EDA contract) only those names may win: a diagnostic
-    bound or a validation probe never becomes a finalist just by scoring well on
-    cross-validation.
+    has since changed is history, not a candidate.
     """
     summary = summary_frame(directory)
     if summary.empty:
@@ -116,12 +135,11 @@ def select(
             f"no cross-validation runs recorded in {directory}/ -- run "
             "src.model.run_ladder (and run_modules, run_transfer) before selecting"
         )
-    eligible_names = set(declared) if restrict_to is None else set(declared) & set(restrict_to)
-    eligible = summary[summary["name"].isin(eligible_names)]
+    eligible = summary[summary["name"].isin(declared)]
     if eligible.empty:
         raise SystemExit(
-            f"none of the runs recorded in {directory}/ is still declared (and eligible) "
-            "in the parameter file; nothing can be selected"
+            f"none of the runs recorded in {directory}/ is still declared in the "
+            "parameter file; nothing can be selected"
         )
     ranked = eligible.sort_values("average_precision_mean", ascending=False)
     return declared[ranked.iloc[0]["name"]], ranked
@@ -381,25 +399,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     figures = Path(args.figures)
     declared = load_parameters(args.parameters)
-    if Path(args.parameters).name == "parameters-eda.txt":
-        require_valid(declared)
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)
     describe(frame, partitions)
 
-    under_contract = Path(args.parameters).name == "parameters-eda.txt"
+    frozen = finalists(declared)
+    chosen: list[RunConfig] | None = None
     if args.config:
         matching = [run for name, run in declared.items() if args.config in name]
         if not matching:
             raise SystemExit(f"no declared section matches {args.config!r}")
         winner, ranking = matching[0], summary_frame(args.results)
+    elif frozen:
+        winner, ranking, chosen = frozen[0], summary_frame(args.results), frozen
     else:
-        winner, ranking = select(
-            declared, args.results, restrict_to=FINALISTS if under_contract else None
-        )
+        winner, ranking = select(declared, args.results)
 
     print("\n=== SELECTED ON CROSS-VALIDATION, NEVER ON THE HOLDOUT ===")
+    if chosen is not None:
+        print("finalists frozen before the holdout was opened: " + ", ".join(FINALISTS))
     if not ranking.empty:
         display = ranking.head(8).assign(
             AP=lambda d: d.average_precision_mean.map("{:.4f}".format)
@@ -410,13 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         print(display[["name", "digest", "model", "ROC", "AP"]].to_string(index=False))
     print(f"\nfinal model: [{winner.name}] ({winner.model}, digest {winner.digest})")
 
-    if under_contract:
-        # Task 7 Step 6 spends the holdout once per declared finalist, not just on
-        # whichever one won cross-validation -- L0 is always the bar the winner has
-        # to beat, so both get a holdout record even when they are the same run.
-        bar = declared.get(FINALISTS[0])
-        chosen = [declared[name] for name in FINALISTS if name in declared]
-    else:
+    if chosen is None:
         bar = next((run for name, run in declared.items() if name.startswith(BAR)), None)
         chosen = [winner] + ([bar] if bar is not None and bar.name != winner.name else [])
 
@@ -428,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         result, predicted, note = run_test(
             config, frame, partitions, directory=args.final, force=args.force
         )
-        scores.append(Scored(alias_label(config.name), actual, np.asarray(predicted, dtype=float)))
+        scores.append(Scored(config.name, actual, np.asarray(predicted, dtype=float)))
         print(f"  {config.digest}  {result.summary_row()}   [{note}]")
 
     positive_rate = float(actual.mean())

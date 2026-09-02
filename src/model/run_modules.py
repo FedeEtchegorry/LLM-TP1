@@ -1,9 +1,9 @@
-"""The module alternatives, each measured against the base configuration L4.
+"""The module alternatives, each measured against one ladder base configuration.
 
     .venv/bin/python -m src.model.run_modules
     .venv/bin/python -m src.model.run_modules --axis C
 
-Every axis point changes exactly one thing from L4, so the difference it produces is
+Every axis point changes exactly one thing from the base, so the difference it produces is
 attributable to that one thing. The table reports the change, not just the level.
 """
 
@@ -57,6 +57,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
+    parser.add_argument(
+        "--base",
+        type=str,
+        default=BASE,
+        help="ladder prefix used as the one-factor comparison base",
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--axis", type=str, default="", help="run one axis only, by its letter"
@@ -89,14 +95,21 @@ def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
-    if Path(args.parameters).name == "parameters-eda.txt":
-        require_valid(declared)
-    base_config = next(
-        run for name, run in ladder_runs(declared).items() if name.startswith(BASE)
-    )
+    matches = [
+        run for name, run in ladder_runs(declared).items()
+        if name.startswith(args.base)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"expected one ladder run starting with {args.base!r}, found {len(matches)}"
+        )
+    base_config = matches[0]
     points, dropped = axis_points(declared, base_config)
     for name, moved in dropped.items():
-        print(f"  skipping [{name}]: moves {len(moved)} fields from {BASE}, not one")
+        print(
+            f"  skipping [{name}]: moves {len(moved)} fields from "
+            f"{args.base}, not one"
+        )
     if args.axis:
         points = {
             name: run for name, run in points.items()

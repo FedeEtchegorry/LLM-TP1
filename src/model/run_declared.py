@@ -1,12 +1,4 @@
-"""Task 7: run every declared section whose name starts with a given prefix.
-
-    .venv/bin/python -m src.model.run_declared --parameters parameters-eda.txt \
-        --results results/eda-contract --prefix "S selected"
-
-Used for the two stability-seed repeats of the frozen candidate M -- and for any
-other prefix-grouped set of sections that is neither a ladder rung nor an axis point,
-so it does not belong in ``run_ladder`` or ``run_modules``.
-"""
+"""Run an explicitly declared family of configurations selected by prefix."""
 
 from __future__ import annotations
 
@@ -14,15 +6,19 @@ import argparse
 import time
 
 from src.eda.loading import load_dataset
+from src.model.baseline import target_of
 from src.model.configs import PARAMETERS_PATH, PROTOCOL, RunConfig, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, sweep_note
-from src.model.protocol import EvaluationResult
+from src.model.protocol import EvaluationResult, markdown_table
 from src.model.results import RESULTS_DIR
 
 
-def selected_runs(declared: dict[str, RunConfig], prefix: str) -> dict[str, RunConfig]:
+def selected_runs(
+    declared: dict[str, RunConfig], prefix: str
+) -> dict[str, RunConfig]:
+    """Return the declared runs whose names begin with ``prefix``."""
     selected = {name: run for name, run in declared.items() if name.startswith(prefix)}
     if not selected:
         raise ValueError(f"no declared runs start with {prefix!r}")
@@ -51,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     partitions = partition(frame)
     describe(frame, partitions)
 
-    print(f"\n=== {args.prefix!r} ({len(runs)} sections from {args.parameters}) ===")
+    print(f"\n=== DECLARED ({len(runs)} runs starting with {args.prefix!r}) ===")
     results: list[EvaluationResult] = []
     trained_seconds, trained = 0.0, 0
     for position, (name, config) in enumerate(runs.items(), start=1):
@@ -69,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
             + sweep_note(trained_seconds, trained, len(runs) - position)
         )
 
+    print()
+    print(markdown_table(results, float(target_of(frame).mean())))
     print(f"\nrecorded in {args.results}/ -- read them with src.model.results")
     return 0
 

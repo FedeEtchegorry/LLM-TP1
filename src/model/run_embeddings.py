@@ -1,3 +1,10 @@
+"""Compare a small set of encodings while the EDA columns stay together.
+
+The classifier, grouped folds and all non-tested representations are fixed inside
+each block. This is not a univariate feature ranking: every case represents the
+complete EDA input contract.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -12,12 +19,10 @@ from sklearn.linear_model import LogisticRegression
 from src.eda.loading import load_dataset
 from src.model.baseline import OneHotLevels, WordIndicators, target_of
 from src.model.configs import PROTOCOL
-from src.model.eda_contract import CONTRACT_FIELDS
+from src.model.eda_contract import CATEGORICAL_FIELDS, NUMERIC_FIELDS, TEXT_FIELDS
 from src.model.embeddings import (
     Continuous,
     ContinuousAndBuckets,
-    HashedLevels,
-    OrdinalLevels,
     Periodic,
     PiecewiseLinear,
     QuantileBucketsBlock,
@@ -26,16 +31,26 @@ from src.model.embeddings import (
 )
 from src.model.experiment import partition
 from src.model.protocol import ScoreFold, evaluate_across_folds
-from src.model.representation_selection import MOVES, compare
+from src.model.representation_selection import choose_deterministic, paired_margin
 from src.model.results import RESULTS_DIR
 
-BAR_CAT = ("popularity_phrase", "category", "allergens")
-PRICE = "price_position"
-TEXT = ("title", "description")
+TEXT = TEXT_FIELDS
+CATEGORICAL = CATEGORICAL_FIELDS
+PRICE = NUMERIC_FIELDS[0]
 REGULARISATION = 1.0
 
 EMBEDDINGS_DIR = "embeddings"
 SWEEP_FILE = "linear-sweep.csv"
+SELECTION_FILE = "selection.json"
+
+TEXT_REFERENCE = "bolsa binaria"
+CATEGORICAL_REFERENCE = "one-hot"
+NUMERIC_REFERENCE = "buckets por cuantiles"
+REFERENCES = {
+    "text": TEXT_REFERENCE,
+    "categorical": CATEGORICAL_REFERENCE,
+    "numeric": NUMERIC_REFERENCE,
+}
 
 
 def sweep_path(results: Path | str) -> Path:
@@ -71,277 +86,121 @@ def blocks_scorer(make_blocks, frame, *, c: float = REGULARISATION) -> ScoreFold
     return score_fold
 
 
-def bar_categoricals():
-    return [OneHotLevels(BAR_CAT)]
+def text_blocks(name: str):
+    builders = {
+        "bolsa binaria": lambda: WordIndicators(TEXT),
+        "tf-idf": lambda: TfidfWords(TEXT),
+    }
+    return [builders[name]()]
 
 
-NUMERIC_CASES = [
-    ("sin price_position", lambda: bar_categoricals()),
-    ("continuo (1 columna)", lambda: bar_categoricals() + [Continuous(PRICE)]),
-    (
-        "percentiles one-hot (la barra)",
-        lambda: bar_categoricals() + [QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "continuo + percentiles (2 codificaciones)",
-        lambda: bar_categoricals() + [ContinuousAndBuckets(PRICE)],
-    ),
-    ("piecewise-linear", lambda: bar_categoricals() + [PiecewiseLinear(PRICE)]),
-    ("periodico (Fourier, 4 frecuencias)", lambda: bar_categoricals() + [Periodic(PRICE)]),
-    ("percentiles 5 tramos", lambda: bar_categoricals() + [QuantileBucketsBlock(PRICE, 5)]),
-    ("percentiles 20 tramos", lambda: bar_categoricals() + [QuantileBucketsBlock(PRICE, 20)]),
-]
+def categorical_blocks(name: str):
+    if name == "one-hot":
+        return [OneHotLevels(CATEGORICAL)]
+    if name == "target encoding suavizado":
+        return [TargetEncoded(field) for field in CATEGORICAL]
+    raise KeyError(name)
 
-CATEGORICAL_CASES = [
-    (
-        "one-hot (lo que dice el informe)",
-        lambda: [OneHotLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "target encoding suavizado",
-        lambda: [TargetEncoded(name) for name in BAR_CAT] + [QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "one-hot + target (2 codificaciones)",
-        lambda: [OneHotLevels(BAR_CAT)]
-        + [TargetEncoded(name) for name in BAR_CAT]
-        + [QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "hashing a 32 columnas",
-        lambda: [HashedLevels(BAR_CAT, 32), QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "ordinal (el control que debe perder)",
-        lambda: [OrdinalLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-]
 
-TEXT_CASES = [
-    (
-        "frase extraida one-hot (la barra)",
-        lambda: [OneHotLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "bolsa de palabras binaria",
-        lambda: [
-            WordIndicators(TEXT),
-            OneHotLevels(("category", "allergens")),
-            QuantileBucketsBlock(PRICE),
-        ],
-    ),
-    (
-        "tf-idf",
-        lambda: [
-            TfidfWords(TEXT),
-            OneHotLevels(("category", "allergens")),
-            QuantileBucketsBlock(PRICE),
-        ],
-    ),
-    (
-        "frase + bolsa de palabras (2 codificaciones)",
-        lambda: [WordIndicators(TEXT), OneHotLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "frase + tf-idf (2 codificaciones)",
-        lambda: [TfidfWords(TEXT), OneHotLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-]
+def numeric_blocks(name: str):
+    builders = {
+        "continuo estandarizado": lambda: Continuous(PRICE),
+        "buckets por cuantiles": lambda: QuantileBucketsBlock(PRICE),
+        "continuo + buckets": lambda: ContinuousAndBuckets(PRICE),
+        "piecewise-linear": lambda: PiecewiseLinear(PRICE),
+        # Para que el eje numerico lineal cubra los mismos cinco modos que el del
+        # Transformer. No es un equivalente exacto: el Transformer aprende las
+        # frecuencias y aca son fijas (diadicas), porque ajustarlas no es convexo.
+        "periodic": lambda: Periodic(PRICE),
+    }
+    return [builders[name]()]
 
-TX_CAT = ("category", "storage_type", "allergens", "unit_of_measure")
-TX_NUM = ("price", "price_position", "net_weight_oz", "nutrition_score")
 
-FIELD_CASES = [
-    (
-        "las 4 del informe (frase+category+allergens+price_pct)",
-        lambda: [OneHotLevels(BAR_CAT), QuantileBucketsBlock(PRICE)],
-    ),
-    (
-        "+ las 2 categoricas que el informe descarta",
-        lambda: [
-            OneHotLevels(BAR_CAT + ("storage_type", "unit_of_measure")),
-            QuantileBucketsBlock(PRICE),
-        ],
-    ),
-    (
-        "+ las 3 numericas que el informe descarta",
-        lambda: [OneHotLevels(BAR_CAT)] + [QuantileBucketsBlock(n) for n in TX_NUM],
-    ),
-    (
-        "las 9 columnas que parameters.txt le da al Transformer",
-        lambda: [
-            WordIndicators(("title", "description", "ingredients")),
-            OneHotLevels(TX_CAT),
+def composed_blocks(text: str, categorical: str, numeric: str):
+    """Build all three families, changing representation rather than fields."""
+    return text_blocks(text) + categorical_blocks(categorical) + numeric_blocks(numeric)
+
+
+def cases_for(
+    block: str, selected: dict[str, str] | None = None
+) -> list[tuple[str, object]]:
+    """Return one-coordinate cases under the decisions made by prior blocks."""
+    selected = selected or {}
+    text = selected.get("text", TEXT_REFERENCE)
+    categorical = selected.get("categorical", CATEGORICAL_REFERENCE)
+
+    if block == "text":
+        names = ("bolsa binaria", "tf-idf")
+        return [
+            (
+                name,
+                lambda name=name: composed_blocks(
+                    name, CATEGORICAL_REFERENCE, NUMERIC_REFERENCE
+                ),
+            )
+            for name in names
         ]
-        + [QuantileBucketsBlock(n) for n in TX_NUM],
-    ),
-]
+    if block == "categorical":
+        names = ("one-hot", "target encoding suavizado")
+        return [
+            (
+                name,
+                lambda name=name: composed_blocks(text, name, NUMERIC_REFERENCE),
+            )
+            for name in names
+        ]
+    if block == "numeric":
+        names = (
+            "continuo estandarizado",
+            "buckets por cuantiles",
+            "continuo + buckets",
+            "piecewise-linear",
+            "periodic",
+        )
+        return [
+            (
+                name,
+                lambda name=name: composed_blocks(text, categorical, name),
+            )
+            for name in names
+        ]
+    raise KeyError(block)
+
+
+TEXT_CASES = cases_for("text")
+CATEGORICAL_CASES = cases_for("categorical")
+NUMERIC_CASES = cases_for("numeric")
 
 BLOCKS = {
-    "numeric": ("LA PREGUNTA ABIERTA: como codificar price_position", NUMERIC_CASES),
-    "categorical": ("CATEGORICAS: contra que se eligio one-hot", CATEGORICAL_CASES),
-    "text": ("TEXTO: frase extraida contra el texto crudo", TEXT_CASES),
-    "fields": ("COLUMNAS: las 4 del informe contra las 9 que recibe el modelo", FIELD_CASES),
-}
-
-# ==============================================================================
-# Task 3 (Ejercicio 2): the eight-case sweep under the frozen EDA contract. Every
-# case here represents the full six columns; only the encoding of one family
-# changes at a time, and the two families not under test keep their reference
-# encoding. Used when --results points at results/eda-contract.
-# ==============================================================================
-
-CONTRACT_TEXT = ("title", "description", "ingredients")
-CONTRACT_CAT = ("category", "allergens")
-CONTRACT_NUM = "price_position"
-
-TEXT_REFERENCE = "bolsa binaria"
-CATEGORICAL_REFERENCE = "one-hot"
-NUMERIC_REFERENCE = "buckets por cuantiles"
-
-
-def _reference_categorical():
-    return OneHotLevels(CONTRACT_CAT)
-
-
-def _reference_numeric():
-    return QuantileBucketsBlock(CONTRACT_NUM)
-
-
-def _reference_text():
-    return WordIndicators(CONTRACT_TEXT)
-
-
-TEXT_CONTRACT_CASES = [
-    (TEXT_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
-    ("tf-idf", lambda: [TfidfWords(CONTRACT_TEXT), _reference_categorical(), _reference_numeric()]),
-]
-
-CATEGORICAL_CONTRACT_CASES = [
-    (CATEGORICAL_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
-    (
-        "target encoding suavizado",
-        lambda: [_reference_text()]
-        + [TargetEncoded(name) for name in CONTRACT_CAT]
-        + [_reference_numeric()],
-    ),
-]
-
-NUMERIC_CONTRACT_CASES = [
-    (NUMERIC_REFERENCE, lambda: [_reference_text(), _reference_categorical(), _reference_numeric()]),
-    (
-        "continuo estandarizado",
-        lambda: [_reference_text(), _reference_categorical(), Continuous(CONTRACT_NUM)],
-    ),
-    (
-        "continuo + buckets",
-        lambda: [_reference_text(), _reference_categorical(), ContinuousAndBuckets(CONTRACT_NUM)],
-    ),
-    (
-        "piecewise-linear",
-        lambda: [_reference_text(), _reference_categorical(), PiecewiseLinear(CONTRACT_NUM)],
-    ),
-    (
-        "periodic",
-        lambda: [_reference_text(), _reference_categorical(), Periodic(CONTRACT_NUM)],
-    ),
-]
-
-CONTRACT_BLOCKS = {
-    "text": ("TEXTO bajo el contrato EDA", TEXT_CONTRACT_CASES),
-    "categorical": ("CATEGORICAS bajo el contrato EDA", CATEGORICAL_CONTRACT_CASES),
-    "numeric": ("NUMERICA bajo el contrato EDA", NUMERIC_CONTRACT_CASES),
+    "text": ("TEXTO: bolsa binaria contra TF-IDF", TEXT_CASES),
+    "categorical": ("CATEGORICAS: one-hot contra target encoding", CATEGORICAL_CASES),
+    "numeric": ("NUMERICA: como codificar price_position", NUMERIC_CASES),
 }
 
 
 def represented_fields(make_blocks) -> frozenset[str]:
-    """Every column a case's blocks read, text, categorical and numeric together."""
-    fields: set[str] = set()
+    """Dataset fields represented by one case, used by the contract test."""
+    represented: set[str] = set()
     for block in make_blocks():
-        fields.update(getattr(block, "fields", (getattr(block, "name", None),)))
-    fields.discard(None)
-    return frozenset(fields)
+        represented.update(getattr(block, "fields", ()))
+        name = getattr(block, "name", None)
+        if name:
+            represented.add(name)
+    return frozenset(represented)
 
 
-def _family_selection(cases, block_key: str) -> tuple[dict[str, np.ndarray], str, dict]:
-    """Run every case in one family, then resolve reference vs. alternatives.
-
-    Returns the per-case AP arrays (five folds each), the selected case name, and the
-    ``selection.json`` entry for this family.
-    """
-    reference_name = cases[0][0]
-    per_case: dict[str, np.ndarray] = {}
-    selected, selected_ap = reference_name, None
-    reason = None
-    for name, make_blocks in cases:
-        scorer = blocks_scorer(make_blocks, _CONTRACT_FRAME)
-        result = evaluate_across_folds(name, _CONTRACT_TARGET, _CONTRACT_PARTITIONS, scorer)
-        ap = np.array([fold.average_precision for fold in result.folds], dtype=float)
-        per_case[name] = ap
-        if name == reference_name:
-            selected_ap = ap
-            continue
-        outcome = compare(per_case[reference_name], ap)
-        if outcome in MOVES:
-            selected, selected_ap = name, ap
-            reason = f"{name} {outcome} over {reference_name} by the declared paired margin"
-        elif reason is None:
-            reason = f"{name} did not improve {reference_name} by the declared paired margin"
-    entry = {"reference": reference_name, "selected": selected, "reason": reason}
-    return per_case, selected, entry
-
-
-_CONTRACT_FRAME = None
-_CONTRACT_TARGET = None
-_CONTRACT_PARTITIONS = None
-
-
-def run_contract_sweep(results: Path | str) -> tuple[pd.DataFrame, dict]:
-    """The eight-case, five-fold sweep of Task 3, plus the chained selection.
-
-    Text is resolved first, then categorical (fed by the text choice only insofar as
-    the *other two* families of every case always use their own reference encoding --
-    "families not under test keep the reference"), then numeric. Writes
-    ``linear-sweep.csv`` and ``selection.json`` under ``results``.
-    """
-    global _CONTRACT_FRAME, _CONTRACT_TARGET, _CONTRACT_PARTITIONS
-
-    frame = load_dataset(PROTOCOL.dataset)
-    _CONTRACT_FRAME = frame
-    _CONTRACT_TARGET = target_of(frame)
-    _CONTRACT_PARTITIONS = partition(frame)
-
-    for _, cases in CONTRACT_BLOCKS.values():
-        for name, make_blocks in cases:
-            assert represented_fields(make_blocks) == CONTRACT_FIELDS, name
-
-    records: list[dict] = []
-    selection: dict[str, dict] = {}
-    for block, (title, cases) in CONTRACT_BLOCKS.items():
-        print(f"\n=== {title} ===")
-        per_case, selected, entry = _family_selection(cases, block)
-        selection[block] = entry
-        for name, ap in per_case.items():
-            for fold_index, value in enumerate(ap):
-                records.append(
-                    {"block": block, "encoding": name, "fold": fold_index, "average_precision": value}
-                )
-        print(f"  selected: {selected}  ({entry['reason']})")
-
-    table = pd.DataFrame(records)
-    sweep_path_out = write_sweep(table, results)
-    selection_path = Path(results) / EMBEDDINGS_DIR / "selection.json"
-    selection_path.parent.mkdir(parents=True, exist_ok=True)
-    selection_path.write_text(json.dumps(selection, indent=2), encoding="utf-8")
-    print(f"\n{len(records)} filas escritas en {sweep_path_out}")
-    print(f"seleccion escrita en {selection_path}")
-    return table, selection
-
-
-def run_block(title, cases, frame, partitions, target, block: str) -> list[dict]:
+def run_block(
+    title,
+    cases,
+    frame,
+    partitions,
+    target,
+    block: str,
+    selected: dict[str, str],
+) -> list[dict]:
     print(f"\n=== {title} ===")
-    print(f"{'codificacion':<46s} {'ROC':>17s} {'AP':>17s} {'cols':>7s}")
-    print("-" * 92)
+    print(f"{'codificacion':<32s} {'ROC':>17s} {'AP':>17s} {'cols':>7s}")
+    print("-" * 78)
     records: list[dict] = []
     for name, make_blocks in cases:
         scorer = blocks_scorer(make_blocks, frame)
@@ -356,29 +215,80 @@ def run_block(title, cases, frame, partitions, target, block: str) -> list[dict]
                     "roc_auc": fold.roc_auc,
                     "average_precision": fold.average_precision,
                     "columns": width,
+                    "text_representation": (
+                        name
+                        if block == "text"
+                        else selected.get("text", TEXT_REFERENCE)
+                    ),
+                    "categorical_representation": (
+                        name
+                        if block == "categorical"
+                        else selected.get("categorical", CATEGORICAL_REFERENCE)
+                    ),
+                    "numeric_representation": (
+                        name if block == "numeric" else NUMERIC_REFERENCE
+                    ),
                 }
             )
         print(
-            f"{name:<46s} {result.roc_auc_mean:.4f} +/- {result.roc_auc_std:.4f} "
-            f"{result.average_precision_mean:.4f} +/- {result.average_precision_std:.4f} "
-            f"{width:>7,d}"
+            f"{name:<32s} {result.roc_auc_mean:.4f} +/- {result.roc_auc_std:.4f} "
+            f"{result.average_precision_mean:.4f} +/- "
+            f"{result.average_precision_std:.4f} {width:>7,d}"
         )
         sys.stdout.flush()
     return records
 
 
+def fold_scores(records: list[dict]) -> dict[str, np.ndarray]:
+    """Collect AP in fold order for one representation block."""
+    table = pd.DataFrame(records)
+    scores: dict[str, np.ndarray] = {}
+    for name, rows in table.groupby("encoding", sort=False):
+        ordered = rows.sort_values("fold")
+        scores[str(name)] = ordered["average_precision"].to_numpy(dtype=float)
+    return scores
+
+
+def decide(block: str, records: list[dict]) -> tuple[str, dict[str, str]]:
+    """Apply the predeclared paired rule and make its reason auditable."""
+    reference = REFERENCES[block]
+    scores = fold_scores(records)
+    selected = choose_deterministic(reference, scores)
+    if selected == reference:
+        reason = f"no alternative beat {reference} on mean AP"
+    else:
+        mean, low, high = paired_margin(scores[selected] - scores[reference])
+        reason = (
+            f"{selected} selected by higher mean AP versus {reference} "
+            f"(delta={mean:.6f}, dispersion=[{low:.6f}, {high:.6f}])"
+        )
+    return selected, {
+        "reference": reference,
+        "selected": selected,
+        "reason": reason,
+    }
+
+
+def write_selection(decisions: dict[str, dict[str, str]], results: Path | str) -> Path:
+    path = Path(results) / EMBEDDINGS_DIR / SELECTION_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(decisions, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--block", type=str, default="", choices=[""] + list(BLOCKS),
+        "--block",
+        type=str,
+        default="",
+        choices=[""] + list(BLOCKS),
         help="run one block only",
     )
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     args = parser.parse_args(argv)
-
-    if Path(args.results).name == "eda-contract" or "eda-contract" in Path(args.results).parts:
-        run_contract_sweep(args.results)
-        return 0
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)
@@ -386,14 +296,30 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{len(frame)} rows, {frame['query_id'].nunique()} queries, "
         f"positive rate {target.mean():.4f}, {PROTOCOL.folds} folds, "
-        "logistic head held fixed"
+        "logistic head and complete EDA input held fixed"
     )
 
     wanted = [args.block] if args.block else list(BLOCKS)
+    if args.block and args.block != "text":
+        raise ValueError(
+            "directed representation selection must start with text; "
+            "run without --block to preserve the declared chain"
+        )
     records: list[dict] = []
+    selected: dict[str, str] = {}
+    decisions: dict[str, dict[str, str]] = {}
     for key in wanted:
-        title, cases = BLOCKS[key]
-        records += run_block(title, cases, frame, partitions, target, key)
+        title, _ = BLOCKS[key]
+        cases = cases_for(key, selected)
+        block_records = run_block(
+            title, cases, frame, partitions, target, key, selected
+        )
+        records += block_records
+        selected[key], decisions[key] = decide(key, block_records)
+        print(
+            f"selected {key}: {selected[key]} -- {decisions[key]['reason']}",
+            flush=True,
+        )
 
     table = pd.DataFrame(records)
     if args.block:
@@ -403,7 +329,10 @@ def main(argv: list[str] | None = None) -> int:
                 [stored[stored["block"] != args.block], table], ignore_index=True
             )
     path = write_sweep(table, args.results)
-    print(f"\n{len(records)} filas por fold escritas en {path}")
+    print(f"\n{len(records)} fold rows written to {path}")
+    if not args.block:
+        selection_path = write_selection(decisions, args.results)
+        print(f"representation decisions written to {selection_path}")
     return 0
 
 
