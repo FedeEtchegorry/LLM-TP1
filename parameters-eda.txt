@@ -87,7 +87,7 @@ categorical_fields = popularity_phrase, category, allergens
 # =============================================================================
 # The selected candidate, copied verbatim from final_config in
 # results/eda-contract/architecture/selection.json. Do not hand-edit: rerun
-# src.model.run_architecture and copy the block it writes.
+# scripts.run_architecture and copy the block it writes.
 #
 # The directed path moved exactly once, on the numeric embedding: buckets beat
 # L2's affine+buckets by the declared paired margin. Depth, width and heads all
@@ -130,7 +130,7 @@ seed               = 1337
 # is a diagnostic on M. If one point wins by the declared paired margin, L1, L2
 # and M are rerun at that setting so the ladder stays comparable, and the whole
 # ladder is reported at the new protocol.
-#   python -m src.model.run_declared --prefix "K "
+#   python -m scripts.run_declared --prefix "K "
 # =============================================================================
 
 [K lr 3e-5]
@@ -258,7 +258,7 @@ seed               = 1337
 # Seed stability for the frozen candidate. These must stay a literal copy of M
 # with seed as the only difference; tests/test_run_declared.py asserts that
 # changed_fields(M, S) == ("seed",). If M is regenerated, regenerate these too.
-#   python -m src.model.run_declared --prefix "S selected"
+#   python -m scripts.run_declared --prefix "S selected"
 # =============================================================================
 
 [S selected seed 7]
@@ -310,7 +310,7 @@ seed               = 99
 # capacity effects were ~0.006, so the best of 22 runs will look good by chance.
 # Any W run that beats M must be reconfirmed on two further seeds before it may
 # replace M. Reported as a search, with its multiplicity stated.
-#   python -m src.model.run_declared --prefix "W "
+#   python -m scripts.run_declared --prefix "W "
 # =============================================================================
 
 [W width 128]
@@ -760,7 +760,7 @@ seed               = 1337
 # of seed noise, the best of them looks good by chance, so it may not replace M
 # until it reproduces on two further seeds. If the lr 2e-4 advantage is real it
 # survives here; if it was the maximum of a noisy search, it collapses.
-#   python -m src.model.run_declared --prefix "Z "
+#   python -m scripts.run_declared --prefix "Z "
 # =============================================================================
 
 [Z lr 2e-4 seed 7]
@@ -884,7 +884,7 @@ seed               = 1337
 #
 # Same confirmation guard as the W block: nothing here replaces N until it
 # reproduces on seeds 7 and 99.
-#   python -m src.model.run_declared --prefix "Y "
+#   python -m scripts.run_declared --prefix "Y "
 # =============================================================================
 
 [Y N lr 5e-5 long]
@@ -968,7 +968,7 @@ seed               = 1337
 # tie-break against N (+0.0056, wins one fold of five), but its lr curve has the
 # shape of a real optimum -- monotone up from 2e-5 to 5e-5, down at 1e-4 -- and it
 # is the most stable run in the whole project (sd 0.0094). Confirm before deciding.
-#   python -m src.model.run_declared --prefix "Z2 "
+#   python -m scripts.run_declared --prefix "Z2 "
 # =============================================================================
 
 [Z2 N lr 5e-5 seed 7]

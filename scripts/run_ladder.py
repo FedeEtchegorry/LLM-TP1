@@ -1,6 +1,6 @@
 """The ladder: the linear bar, then each component the Transformer adds to reach it.
 
-    .venv/bin/python -m src.model.run_ladder
+    .venv/bin/python -m scripts.run_ladder
 
 Every rung is declared in ``parameters.txt`` and is one run that doubles as a slide and
 as a point in the ablation table:

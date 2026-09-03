@@ -17,7 +17,7 @@ from src.model.figures import (
     training_curves,
 )
 from src.model.results import RESULTS_DIR, curve_frame, fold_frame
-from src.model.run_embeddings import read_sweep
+from scripts.run_embeddings import read_sweep
 
 SEEDS_FILE = "embeddings/seeds-numeric-axis.csv"
 BAR_NAME = "L0 linear bar"

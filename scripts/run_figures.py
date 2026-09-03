@@ -1,7 +1,7 @@
 """Regenerate every figure the model side draws, from ``results/`` alone.
 
-    .venv/bin/python -m src.model.run_figures
-    .venv/bin/python -m src.model.run_figures --only 09-final-roc-pr
+    .venv/bin/python -m scripts.run_figures
+    .venv/bin/python -m scripts.run_figures --only 09-final-roc-pr
 
 Nothing here trains and nothing here calls ``evaluate_on_test``: every number comes
 from a record already on disk -- the cross-validation and holdout JSON documents, the
@@ -51,7 +51,7 @@ from src.model.results import (
     load_predictions,
     summary_frame,
 )
-from src.model.run_final import explainable, interpretability, rebuild
+from scripts.run_final import explainable, interpretability, rebuild
 
 BAR = "L0"
 ERROR_COLUMN = "popularity_phrase"
@@ -223,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         if cached is None:
             print(
                 "  [aviso] A* no tiene holdout registrado "
-                "(correr src.model.run_ceiling_holdout); las 09 salen sin la cota"
+                "(correr scripts.run_ceiling_holdout); las 09 salen sin la cota"
             )
         else:
             scores.append(

@@ -50,58 +50,58 @@ def steps(args: argparse.Namespace) -> list[Step]:
     all_steps = [
         Step(
             "run_embeddings",
-            [py, "-m", "src.model.run_embeddings", "--results", RESULTS],
+            [py, "-m", "scripts.run_embeddings", "--results", RESULTS],
         ),
         Step(
             "run_ladder",
-            [py, "-m", "src.model.run_ladder", "--parameters", PARAMETERS, "--results", RESULTS],
+            [py, "-m", "scripts.run_ladder", "--parameters", PARAMETERS, "--results", RESULTS],
         ),
         Step(
             "run_architecture",
-            [py, "-m", "src.model.run_architecture", "--parameters", PARAMETERS, "--results", RESULTS],
+            [py, "-m", "scripts.run_architecture", "--parameters", PARAMETERS, "--results", RESULTS],
         ),
         Step(
             "run_greedy_validation",
             [
-                py, "-m", "src.model.run_greedy_validation",
+                py, "-m", "scripts.run_greedy_validation",
                 "--parameters", PARAMETERS, "--results", RESULTS, "--output", GREEDY_OUTPUT,
             ],
         ),
         Step(
             "run_eda_audit",
             [
-                py, "-m", "src.model.run_eda_audit",
+                py, "-m", "scripts.run_eda_audit",
                 "--parameters", PARAMETERS, "--results", RESULTS, "--output", AUDIT_OUTPUT, "--strict",
             ],
         ),
         Step(
             "run_declared (stability seeds)",
             [
-                py, "-m", "src.model.run_declared",
+                py, "-m", "scripts.run_declared",
                 "--parameters", PARAMETERS, "--results", RESULTS, "--prefix", "S selected",
             ],
         ),
         Step(
             "run_final",
             [
-                py, "-m", "src.model.run_final",
+                py, "-m", "scripts.run_final",
                 "--parameters", PARAMETERS, "--results", RESULTS, "--final-results", FINAL_RESULTS,
             ],
         ),
         Step(
             "run_transfer",
-            [py, "-m", "src.model.run_transfer", "--parameters", PARAMETERS, "--results", RESULTS],
+            [py, "-m", "scripts.run_transfer", "--parameters", PARAMETERS, "--results", RESULTS],
             optional=True,
         ),
         Step(
             "run_embedding_figures",
-            [py, "-m", "src.model.run_embedding_figures", "--results", RESULTS, "--figures", FIGURES],
+            [py, "-m", "scripts.run_embedding_figures", "--results", RESULTS, "--figures", FIGURES],
             optional=True,
         ),
         Step(
             "run_figures",
             [
-                py, "-m", "src.model.run_figures",
+                py, "-m", "scripts.run_figures",
                 "--parameters", PARAMETERS, "--results", RESULTS, "--figures", FIGURES,
             ],
             optional=True,

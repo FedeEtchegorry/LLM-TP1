@@ -1,7 +1,7 @@
 """The module alternatives, each measured against one ladder base configuration.
 
-    .venv/bin/python -m src.model.run_modules
-    .venv/bin/python -m src.model.run_modules --axis C
+    .venv/bin/python -m scripts.run_modules
+    .venv/bin/python -m scripts.run_modules --axis C
 
 Every axis point changes exactly one thing from the base, so the difference it produces is
 attributable to that one thing. The table reports the change, not just the level.

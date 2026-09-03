@@ -51,14 +51,14 @@ tres.
 ### La escalera
 
 ```bash
-.venv/bin/python -m src.model.run_ladder
-.venv/bin/python -m src.model.run_seeds --prefix L1     # un peldaño, con las 3 semillas
+.venv/bin/python -m scripts.run_ladder
+.venv/bin/python -m scripts.run_seeds --prefix L1     # un peldaño, con las 3 semillas
 ```
 
 ### Representación de cada columna
 
 ```bash
-.venv/bin/python -m src.model.run_embeddings --results results/eda-contract
+.venv/bin/python -m scripts.run_embeddings --results results/eda-contract
 ```
 
 Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
@@ -66,8 +66,8 @@ Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
 ### Búsqueda de arquitectura
 
 ```bash
-.venv/bin/python -m src.model.run_bracket_search --results results/eda-contract
-.venv/bin/python -m src.model.run_attention_ablation --results results/eda-contract
+.venv/bin/python -m scripts.run_bracket_search --results results/eda-contract
+.venv/bin/python -m scripts.run_attention_ablation --results results/eda-contract
 ```
 
 Escriben `architecture/bracket-search.json` y `architecture/attention-ablation.json`.
@@ -75,8 +75,8 @@ Escriben `architecture/bracket-search.json` y `architecture/attention-ablation.j
 ### Evaluación final
 
 ```bash
-.venv/bin/python -m src.model.run_final_comparison --results results/eda-contract
-.venv/bin/python -m src.model.run_ceiling_holdout --results results/eda-contract
+.venv/bin/python -m scripts.run_final_comparison --results results/eda-contract
+.venv/bin/python -m scripts.run_ceiling_holdout --results results/eda-contract
 ```
 
 **Se corren una vez.** Enfrentan dos modelos congelados antes de abrir el holdout, y
@@ -85,15 +85,15 @@ escriben `final/comparison.json` y `final/ceiling.json`.
 ### Transfer learning
 
 ```bash
-.venv/bin/python -m src.model.run_transfer --parameters parameters.txt
+.venv/bin/python -m scripts.run_transfer --parameters parameters.txt
 ```
 
 ### Figuras
 
 ```bash
-.venv/bin/python -m src.model.run_eda_contract_figures \
+.venv/bin/python -m scripts.run_eda_contract_figures \
     --results results/eda-contract --figures figures/eda-contract
-.venv/bin/python -m src.model.run_figures \
+.venv/bin/python -m scripts.run_figures \
     --results results/eda-contract --figures figures/final-bracket
 ```
 

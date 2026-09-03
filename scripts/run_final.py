@@ -1,7 +1,7 @@
 """Stage 6: spend the holdout once, then ask the model why.
 
-    .venv/Scripts/python -m src.model.run_final
-    .venv/Scripts/python -m src.model.run_final --config "L4"
+    .venv/Scripts/python -m scripts.run_final
+    .venv/Scripts/python -m scripts.run_final --config "L4"
 
 The 20% test split has not been read by anything up to here -- not by the ladder, not
 by the sweep, not by the transfer runs, and not by the early stopping inside any of
@@ -133,7 +133,7 @@ def select(
     if summary.empty:
         raise SystemExit(
             f"no cross-validation runs recorded in {directory}/ -- run "
-            "src.model.run_ladder (and run_modules, run_transfer) before selecting"
+            "scripts.run_ladder (and run_modules, run_transfer) before selecting"
         )
     eligible = summary[summary["name"].isin(declared)]
     if eligible.empty:

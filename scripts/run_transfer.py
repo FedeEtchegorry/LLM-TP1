@@ -1,7 +1,7 @@
 """Stages 4 and 5: what somebody else's weights are worth on this problem.
 
-    .venv/Scripts/python -m src.model.run_transfer
-    .venv/Scripts/python -m src.model.run_transfer --only frozen
+    .venv/Scripts/python -m scripts.run_transfer
+    .venv/Scripts/python -m scripts.run_transfer --only frozen
 
 Three things happen, in this order:
 
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(present) < len(rows):
         print(
             f"  {len(rows) - len(present)} of the runs this table needs are not "
-            "recorded yet; run src.model.run_ladder first for the scratch row"
+            "recorded yet; run scripts.run_ladder first for the scratch row"
         )
     if present:
         print()

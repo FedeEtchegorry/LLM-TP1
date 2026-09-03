@@ -31,7 +31,7 @@ class TrainedFold:
     """A fitted model, ready to be scored, recorded and -- if it is ours -- saved.
 
     ``model`` and ``encoder`` are typed loosely because the four regimes carry
-    different objects there; only ``src.model.run_final`` reaches into them, and it
+    different objects there; only ``scripts.run_final`` reaches into them, and it
     does so for the Transformer alone.
     """
 

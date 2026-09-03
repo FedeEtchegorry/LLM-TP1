@@ -1,6 +1,6 @@
 """Un peldaño declarado, medido con las tres semillas del protocolo.
 
-    .venv/Scripts/python -m src.model.run_seeds --prefix L1
+    .venv/Scripts/python -m scripts.run_seeds --prefix L1
 
 Los peldaños se declaran con una sola semilla y las decisiones comparan medias de tres.
 Reusa lo grabado: sólo entrena las que falten.

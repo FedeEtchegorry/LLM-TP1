@@ -1,6 +1,6 @@
 """Búsqueda por bracket adaptativo: tres variantes por eje, y se extiende si gana un borde.
 
-    .venv/Scripts/python -m src.model.run_bracket_search \
+    .venv/Scripts/python -m scripts.run_bracket_search \
         --parameters parameters-eda.txt --results results/eda-contract
 
 Gana la media más alta sobre tres semillas, sin margen ni desempate por dispersión.

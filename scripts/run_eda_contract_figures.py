@@ -1,6 +1,6 @@
 """The four pre-holdout decision charts of the Ejercicio 2 flow.
 
-    .venv/bin/python -m src.model.run_eda_contract_figures \
+    .venv/bin/python -m scripts.run_eda_contract_figures \
         --results results/eda-contract --figures figures/eda-contract
 
 All four charts use recorded evidence. The architecture path and greedy neighbourhood
@@ -21,7 +21,7 @@ import pandas as pd
 from src.model import figures as fig
 from src.model.representation_selection import compare_folds, paired_margin
 from src.model.results import RESULTS_DIR, fold_frame, summary_frame
-from src.model.run_embeddings import read_sweep
+from scripts.run_embeddings import read_sweep
 
 LADDER_ORDER = [
     "L0a linear, no text",
@@ -182,7 +182,7 @@ def chart_1_representations(results: str, figures: Path) -> Path | None:
     if sweep.empty:
         print(
             "  [1] falta results/eda-contract/embeddings/linear-sweep.csv "
-            "(correr src.model.run_embeddings --results <resultados>)"
+            "(correr scripts.run_embeddings --results <resultados>)"
         )
         return None
     path = fig.encoding_families(
@@ -415,7 +415,7 @@ def _bracket_stages(results: str) -> tuple[list[dict], dict]:
 
     search_path = Path(results) / "architecture" / "bracket-search.json"
     if not search_path.exists():
-        raise RuntimeError(f"falta {search_path}: correr src.model.run_bracket_search")
+        raise RuntimeError(f"falta {search_path}: correr scripts.run_bracket_search")
     search = json.loads(search_path.read_text(encoding="utf-8"))
     spreads = _seed_index(results)
 

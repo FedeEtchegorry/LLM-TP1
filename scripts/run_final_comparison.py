@@ -1,6 +1,6 @@
 """La comparación final: el mejor lineal contra el mejor Transformer, en el holdout.
 
-    .venv/Scripts/python -m src.model.run_final_comparison \
+    .venv/Scripts/python -m scripts.run_final_comparison \
         --parameters parameters-eda.txt --results results/eda-contract
 
 **Se corre una sola vez**, sobre dos modelos congelados antes de abrir el conjunto.
@@ -27,7 +27,7 @@ from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_test
 from src.model.protocol import evaluate_on_test
 from src.model.results import RESULTS_DIR
-from src.model.run_embeddings import blocks_scorer, composed_blocks
+from scripts.run_embeddings import blocks_scorer, composed_blocks
 
 TRANSFORMER_FINALIST = "FINAL bracket d96 L2 h4 piecewise do0.3 lr2e-4 seed99"
 

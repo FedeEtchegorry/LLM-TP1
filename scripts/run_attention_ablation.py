@@ -1,6 +1,6 @@
 """La ablación que aísla la autoatención: la arquitectura elegida con cero bloques.
 
-    .venv/Scripts/python -m src.model.run_attention_ablation \
+    .venv/Scripts/python -m scripts.run_attention_ablation \
         --results results/eda-contract
 
 Compara la arquitectura elegida contra esa misma arquitectura con ``n_layers = 0``: un
@@ -22,7 +22,7 @@ from src.model.console import utf8_console
 from src.model.experiment import describe, partition
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
 from src.model.results import RESULTS_DIR
-from src.model.run_bracket_search import (
+from scripts.run_bracket_search import (
     ARCHITECTURE_DIR,
     SEARCH_FILE,
     Evaluator,
@@ -36,7 +36,7 @@ def chosen(results: str | Path) -> RunConfig:
     """La arquitectura que escribió el recorrido, tal cual."""
     path = Path(results) / ARCHITECTURE_DIR / SEARCH_FILE
     if not path.exists():
-        raise SystemExit(f"falta {path}: correr src.model.run_bracket_search primero")
+        raise SystemExit(f"falta {path}: correr scripts.run_bracket_search primero")
     document = json.loads(path.read_text(encoding="utf-8"))
     fields = dict(document["final"]["config"])
     for name in ("text_fields", "categorical_fields", "numeric_fields"):

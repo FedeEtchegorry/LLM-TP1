@@ -1,6 +1,6 @@
 """El techo diagnóstico (``L0b``) medido sobre el holdout, para enmarcar el resultado.
 
-    .venv/Scripts/python -m src.model.run_ceiling_holdout \
+    .venv/Scripts/python -m scripts.run_ceiling_holdout \
         --parameters parameters-eda.txt --results results/eda-contract
 
 ``L0b`` no compite ni entra a ``eda_contract.FINALISTS``: sólo dibuja la cota superior

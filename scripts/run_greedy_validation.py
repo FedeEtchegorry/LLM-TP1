@@ -1,6 +1,6 @@
 """Whether the directed path's own order decided where it stopped.
 
-    .venv/Scripts/python -m src.model.run_greedy_validation \
+    .venv/Scripts/python -m scripts.run_greedy_validation \
         --parameters parameters-eda.txt --results results/eda-contract
 
 Task 5 walks depth, then width, then heads, resolving each axis against the winner
@@ -32,7 +32,7 @@ from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one
 from src.model.representation_selection import compare, paired_margin
 from src.model.results import RESULTS_DIR
-from src.model.run_architecture import (
+from scripts.run_architecture import (
     ARCHITECTURE_DIR,
     FINAL_NAME,
     HEADS,
@@ -137,7 +137,7 @@ def read_selection(results: Path | str) -> dict:
     path = Path(results) / ARCHITECTURE_DIR / SELECTION_FILE
     if not path.exists():
         raise SystemExit(
-            f"{path} is missing -- run src.model.run_architecture before validating it"
+            f"{path} is missing -- run scripts.run_architecture before validating it"
         )
     return json.loads(path.read_text(encoding="utf-8"))
 

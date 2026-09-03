@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import platform
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 
 def device(preferred: str | None = None):
