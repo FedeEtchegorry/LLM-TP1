@@ -38,11 +38,10 @@ columna (`src/eda/noise.py`).
 Las corridas se declaran en `parameters-eda.txt`, no en el código: `[DEFAULT]` tiene la
 arquitectura base y cada sección dice sólo lo que cambia.
 
-> `parameters.txt` declara **secciones con los mismos prefijos y distinto contenido**
-> (su `[L1 bag of embeddings]` no es el `[L1 learned embeddings, no attention]` de
-> `parameters-eda.txt`). Con el archivo equivocado un runner no falla: entrena otra red
-> y la graba como si fuera la pedida. El default es `parameters-eda.txt`, salvo en
-> `run_transfer`, `run_modules` y `search`, que parten de secciones que sólo están en
+> Hay dos archivos de parámetros y **no comparten ninguna sección**:
+> `parameters-eda.txt` (53 secciones, el contrato del EDA) y `parameters.txt`
+> (43 secciones, el barrido por ejes). El default es `parameters-eda.txt`, salvo en
+> `run_transfer` y `run_modules`, que parten de secciones que sólo están en
 > `parameters.txt`.
 
 Cada configuración se mide con tres semillas (1337, 7, 99) y decide la media de las
@@ -134,9 +133,7 @@ Los pesos van a `results/weights/<digest>/fold-<k>.pt` y quedan fuera de git por
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests -q \
-    --ignore=tests/test_decisions.py --ignore=tests/test_migration.py
+.venv/bin/python -m pytest tests -q
 ```
 
-Los dos `--ignore` son módulos que importan código inexistente y no llegan a
-recolectarse.
+`tests/` está en `.gitignore`: es material de trabajo local y no se versiona.

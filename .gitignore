@@ -18,6 +18,7 @@ lib/
 lib64/
 parts/
 sdist/
+clases/
 var/
 wheels/
 share/python-wheels/
@@ -231,3 +232,8 @@ tests/
 # Trained weights -- large and regenerable; the JSON metrics beside them are not
 results/weights/
 **/weights/
+
+# Documentos de arquitectura -- referencias locales del equipo, no se versionan.
+# Su ultima version commiteada esta en d4fe6a1 por si hace falta recuperarlas.
+ARCHITECTURE.md
+OLD_ARCHITECTURE.md
