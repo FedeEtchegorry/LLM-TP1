@@ -1,6 +1,4 @@
-"""Independent model towers for the late-fusion architecture.
-
-"""
+"""Independent towers and fusion head for the late-fusion architecture."""
 
 from __future__ import annotations
 
@@ -148,3 +146,28 @@ class TabularTower(nn.Module):
     def forward(self, x_tab: torch.Tensor) -> torch.Tensor:
         """Map ``(B, input_dim)`` to a normalized ``(B, output_dim)``."""
         return self.layers(x_tab)
+
+
+class FusionHead(nn.Module):
+    """Concatenate both tower representations and produce one logit per row."""
+
+    def __init__(
+        self,
+        text_dim: int,
+        tabular_dim: int,
+        hidden_dim: int = 32,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(text_dim + tabular_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
+        )
+        self.apply(_init_weights)
+
+    def forward(self, h_text: torch.Tensor, h_tab: torch.Tensor) -> torch.Tensor:
+        """Fuse ``(B, text_dim)`` and ``(B, tabular_dim)`` into ``(B,)`` logits."""
+        fused = torch.cat((h_text, h_tab), dim=-1)
+        return self.layers(fused).squeeze(-1)

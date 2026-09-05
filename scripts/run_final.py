@@ -45,7 +45,6 @@ from src.model.baseline import target_of
 from src.model.configs import (
     EDA_PARAMETERS,
     PROTOCOL,
-    TRAINING,
     TRANSFORMER,
     RunConfig,
     load_parameters,
@@ -169,7 +168,7 @@ def rebuild(
     if state is None:
         return None, None
     encoder = RowEncoder(spec_for(config)).fit(frame, train_indices)
-    model = BtrTransformer(encoder, config, TRAINING.n_buckets)
+    model = BtrTransformer(encoder, config)
     model.load_state_dict(state)
     model.eval()
     return model, encoder

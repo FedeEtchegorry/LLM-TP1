@@ -31,8 +31,8 @@ from sklearn.model_selection import StratifiedGroupKFold
 
 from src.model.baseline import target_of
 from src.model.configs import TRAINING, RunConfig
-from src.model.encoding import EncodedRows, EncodingSpec, RowEncoder
-from src.model.network import BtrTransformer, count_parameters
+from src.model.encoding import EncodingSpec, RowEncoder
+from src.model.network import BtrTransformer, TowerBatch, count_parameters
 from src.model.protocol import ScoreFold
 from src.model.records import EpochRecord, TrainedFold
 
@@ -49,6 +49,23 @@ a different fit/stop split, and the two effects would be impossible to tell apar
 INFERENCE_BATCH = 256
 
 MEMBER_STRIDE = 1000
+
+
+def _batch_to(batch: TowerBatch, device) -> TowerBatch:
+    """Move both independent tower inputs to the same device."""
+    text, tabular = batch
+    return text.to(device), tabular.to(device)
+
+
+def _batch_select(batch: TowerBatch, rows: torch.Tensor) -> TowerBatch:
+    """Select the same rows, in the same order, from both tower inputs."""
+    text, tabular = batch
+    return text.select(rows), tabular.select(rows)
+
+
+def _batch_size(batch: TowerBatch) -> int:
+    """The shared number of rows in a paired tower batch."""
+    return len(batch[0])
 
 
 def spec_for(config: RunConfig) -> EncodingSpec:
@@ -101,12 +118,12 @@ def train_fold(
     )
 
     encoder = RowEncoder(spec_for(config)).fit(frame, train_indices)
-    fit_rows = encoder.transform(frame, fit_indices).to(device)
-    stop_rows = encoder.transform(frame, stop_indices).to(device)
+    fit_rows = _batch_to(encoder.transform(frame, fit_indices), device)
+    stop_rows = _batch_to(encoder.transform(frame, stop_indices), device)
     fit_target = torch.tensor(target[fit_indices], dtype=torch.float32, device=device)
     stop_target = torch.tensor(target[stop_indices], dtype=torch.float32, device=device)
 
-    model = BtrTransformer(encoder, config, TRAINING.n_buckets).to(device)
+    model = BtrTransformer(encoder, config).to(device)
     optimiser = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
@@ -122,11 +139,11 @@ def train_fold(
 
     for epoch in range(1, config.epochs + 1):
         model.train()
-        order = torch.randperm(len(fit_rows), generator=generator).to(device)
+        order = torch.randperm(_batch_size(fit_rows), generator=generator).to(device)
         for start in range(0, len(order), config.batch_size):
             rows = order[start : start + config.batch_size]
             optimiser.zero_grad(set_to_none=True)
-            loss = loss_of(model(fit_rows.select(rows)), fit_target[rows])
+            loss = loss_of(model(_batch_select(fit_rows, rows)), fit_target[rows])
             loss.backward()
             optimiser.step()
 
@@ -177,24 +194,25 @@ def _member_scores(trained: TrainedFold, frame, scored_indices) -> list[np.ndarr
 
 
 @torch.no_grad()
-def predict(model: BtrTransformer, rows: EncodedRows) -> np.ndarray:
+def predict(model: BtrTransformer, rows: TowerBatch) -> np.ndarray:
     """Return probabilities in bounded inference batches."""
     model.eval()
     device = next(model.parameters()).device
-    rows = rows.to(device)
+    rows = _batch_to(rows, device)
     scores = [
         torch.sigmoid(
             model(
-                rows.select(
+                _batch_select(
+                    rows,
                     torch.arange(
                         start,
-                        min(start + INFERENCE_BATCH, len(rows)),
+                        min(start + INFERENCE_BATCH, _batch_size(rows)),
                         device=device,
                     )
                 )
             )
         )
-        for start in range(0, len(rows), INFERENCE_BATCH)
+        for start in range(0, _batch_size(rows), INFERENCE_BATCH)
     ]
     return torch.cat(scores).cpu().numpy()
 
@@ -202,26 +220,27 @@ def predict(model: BtrTransformer, rows: EncodedRows) -> np.ndarray:
 @torch.no_grad()
 def _measure(
     model: BtrTransformer,
-    rows: EncodedRows,
+    rows: TowerBatch,
     target: torch.Tensor,
     loss_of: nn.Module,
 ) -> tuple[float, float]:
     """Loss and average precision on one split, without touching the gradients."""
     model.eval()
     device = next(model.parameters()).device
-    rows = rows.to(device)
+    rows = _batch_to(rows, device)
     logits = torch.cat(
         [
             model(
-                rows.select(
+                _batch_select(
+                    rows,
                     torch.arange(
                         start,
-                        min(start + INFERENCE_BATCH, len(rows)),
+                        min(start + INFERENCE_BATCH, _batch_size(rows)),
                         device=device,
                     )
                 )
             )
-            for start in range(0, len(rows), INFERENCE_BATCH)
+            for start in range(0, _batch_size(rows), INFERENCE_BATCH)
         ]
     )
     loss = float(loss_of(logits, target))
