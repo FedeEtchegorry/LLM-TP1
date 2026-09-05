@@ -1,11 +1,10 @@
-"""One row becomes one heterogeneous sequence.
+"""Fold-local preprocessing for the text and tabular model towers.
 
-    [CLS] · text tokens · one token per categorical field · one per numeric field
+``RowEncoder.transform`` deliberately returns two independent batches. Text keeps
+only ``[CLS]`` and word-token positions, while the tabular branch has a stable
+30-column contract. Anything learned from data (the word vocabulary and the price
+interval bounds) is still fitted only on the training rows of a fold.
 
-Which columns enter is a knob rather than a constant: ``title`` and ``description``
-are separate fields, so they can be measured apart and then together. Vocabulary,
-categorical levels, imputation medians, scales and bucket edges are all fitted on the
-training rows of a fold and never on the rows being scored.
 """
 
 from __future__ import annotations
@@ -21,28 +20,49 @@ import torch
 from src.eda.aspects.composition import NO_ALLERGENS, NUTRITION_SENTINEL
 
 TEXT_FIELDS: tuple[str, ...] = ("title", "description", "ingredients")
-CATEGORICAL_FIELDS: tuple[str, ...] = (
-    "category",
-    "storage_type",
-    "allergens",
-    "unit_of_measure",
-)
-NUMERIC_FIELDS: tuple[str, ...] = (
-    "price",
-    "price_position",
-    "net_weight_oz",
-    "nutrition_score",
-)
+CATEGORICAL_FIELDS: tuple[str, ...] = ("category", "allergens")
+NUMERIC_FIELDS: tuple[str, ...] = ("price_position",)
 SENTINEL_FIELDS: frozenset[str] = frozenset({"nutrition_score"})
 """Columns where a literal zero means "not applicable" rather than a low score."""
 
 PAD, WORD_UNK, CLS = 0, 1, 2
 N_SPECIAL = 3
 
+CATEGORY_LEVELS: tuple[str, ...] = (
+    "Baby",
+    "Bakery",
+    "Beverages",
+    "Dairy",
+    "Frozen",
+    "Household",
+    "Meat",
+    "Pantry",
+    "Personal Care",
+    "Produce",
+    "Seafood",
+    "Snacks",
+)
+ALLERGEN_LEVELS: tuple[str, ...] = (
+    NO_ALLERGENS,
+    "Fish",
+    "Milk",
+    "Peanuts",
+    "Shellfish",
+    "Soy",
+    "Tree nuts",
+    "Wheat",
+)
+PRICE_PIECES = 10
+TABULAR_WIDTH = len(CATEGORY_LEVELS) + len(ALLERGEN_LEVELS) + PRICE_PIECES
+
+_TOKEN_TYPE = {name: position for position, name in enumerate(TEXT_FIELDS)}
+
 _TOKEN = re.compile(r"[a-z0-9]+")
 
 
 def tokenize(text: object) -> list[str]:
+    if text is None or pd.isna(text):
+        return []
     return _TOKEN.findall(str(text).lower())
 
 
@@ -59,6 +79,48 @@ class EncodingSpec:
     def __post_init__(self) -> None:
         if not (self.text_fields or self.categorical_fields or self.numeric_fields):
             raise ValueError("a spec must carry at least one field")
+
+
+@dataclass(frozen=True)
+class TextBatch:
+    """Text-only inputs, each with shape ``(rows, sequence_length)``."""
+
+    input_ids: torch.Tensor
+    token_type_ids: torch.Tensor
+    attention_mask: torch.Tensor
+
+    def __len__(self) -> int:
+        return int(self.input_ids.shape[0])
+
+    def to(self, device) -> "TextBatch":
+        return TextBatch(
+            input_ids=self.input_ids.to(device),
+            token_type_ids=self.token_type_ids.to(device),
+            attention_mask=self.attention_mask.to(device),
+        )
+
+    def select(self, rows: torch.Tensor) -> "TextBatch":
+        return TextBatch(
+            input_ids=self.input_ids[rows],
+            token_type_ids=self.token_type_ids[rows],
+            attention_mask=self.attention_mask[rows],
+        )
+
+
+@dataclass(frozen=True)
+class TabBatch:
+    """The independent 30-dimensional tabular input."""
+
+    x_tab: torch.Tensor
+
+    def __len__(self) -> int:
+        return int(self.x_tab.shape[0])
+
+    def to(self, device) -> "TabBatch":
+        return TabBatch(x_tab=self.x_tab.to(device))
+
+    def select(self, rows: torch.Tensor) -> "TabBatch":
+        return TabBatch(x_tab=self.x_tab[rows])
 
 
 @dataclass(frozen=True)
@@ -107,44 +169,38 @@ class RowEncoder:
 
     spec: EncodingSpec = field(default_factory=EncodingSpec)
     _words: dict[str, int] = field(default_factory=dict, init=False)
-    _levels: dict[str, dict[str, int]] = field(default_factory=dict, init=False)
-    _level_unknown: dict[str, int] = field(default_factory=dict, init=False)
     _centres: dict[str, float] = field(default_factory=dict, init=False)
     _scales: dict[str, float] = field(default_factory=dict, init=False)
     _edges: dict[str, np.ndarray] = field(default_factory=dict, init=False)
     _bounds: dict[str, np.ndarray] = field(default_factory=dict, init=False)
+    _tabular_price_centre: float = field(default=0.0, init=False)
+    _tabular_price_bounds: np.ndarray = field(
+        default_factory=lambda: np.empty(0), init=False
+    )
     _text_width: int = field(default=0, init=False)
     _fitted: bool = field(default=False, init=False)
 
     def fit(self, frame: pd.DataFrame, train_indices) -> Self:
         training = frame.iloc[list(train_indices)]
         self._fit_words(training)
-        self._fit_levels(training)
         self._fit_numbers(training)
+        self._fit_tabular_price(training)
         self._fitted = True
         return self
 
-    def transform(self, frame: pd.DataFrame, indices) -> EncodedRows:
+    def transform(
+        self, frame: pd.DataFrame, indices
+    ) -> tuple[TextBatch, TabBatch]:
+        """Encode rows into independent text and tabular tower inputs."""
         if not self._fitted:
             raise RuntimeError("the encoder was never fitted")
         rows = frame.iloc[list(indices)]
-        token_ids, field_ids, mask = self._discrete(rows)
-        values, buckets, missing, ratios = self._numeric(rows)
-        return EncodedRows(
-            token_ids=torch.from_numpy(token_ids),
-            field_ids=torch.from_numpy(field_ids),
-            padding_mask=torch.from_numpy(mask),
-            numeric_values=torch.from_numpy(values),
-            numeric_buckets=torch.from_numpy(buckets),
-            numeric_missing=torch.from_numpy(missing),
-            numeric_ratios=torch.from_numpy(ratios),
-        )
+        return self._text_batch(rows), self._tab_batch(rows)
 
     @property
     def vocabulary_size(self) -> int:
-        """Words plus categorical levels plus the three special tokens."""
-        levels = sum(len(codes) + 1 for codes in self._levels.values())
-        return N_SPECIAL + len(self._words) + levels
+        """Size of the text-only vocabulary, including the three special tokens."""
+        return N_SPECIAL + len(self._words)
 
     @property
     def n_fields(self) -> int:
@@ -153,7 +209,8 @@ class RowEncoder:
 
     @property
     def sequence_length(self) -> int:
-        return 1 + self._text_width + len(self.spec.categorical_fields)
+        """Padded width of ``[CLS]`` followed by word-token positions."""
+        return 1 + self._text_width
 
     @property
     def n_numeric(self) -> int:
@@ -184,18 +241,6 @@ class RowEncoder:
         }
         self._text_width = min(longest, self.spec.max_text_tokens)
 
-    def _fit_levels(self, training: pd.DataFrame) -> None:
-        self._levels = {}
-        self._level_unknown = {}
-        offset = N_SPECIAL + len(self._words)
-        for name in self.spec.categorical_fields:
-            levels = sorted(categorical_column(training, name).unique())
-            self._levels[name] = {
-                level: offset + position for position, level in enumerate(levels)
-            }
-            self._level_unknown[name] = offset + len(levels)
-            offset += len(levels) + 1
-
     def _fit_numbers(self, training: pd.DataFrame) -> None:
         self._centres, self._scales, self._edges, self._bounds = {}, {}, {}, {}
         for name in self.spec.numeric_fields:
@@ -218,42 +263,76 @@ class RowEncoder:
                 cuts[position] = np.nextafter(cuts[position - 1], np.inf)
         return cuts
 
-    def _discrete(
-        self, rows: pd.DataFrame
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """``[CLS]``, the text tokens padded to a common width, then one token each."""
+    def _fit_tabular_price(self, training: pd.DataFrame) -> None:
+        """Fit the tabular tower's ten price intervals from training rows only."""
+        if "price_position" not in self.spec.numeric_fields:
+            self._tabular_price_centre = 0.0
+            self._tabular_price_bounds = np.empty(0)
+            return
+        values = numeric_column(training, "price_position")
+        present = values[~np.isnan(values)]
+        self._tabular_price_centre = float(np.median(present)) if present.size else 0.0
+        filled = np.where(np.isnan(values), self._tabular_price_centre, values)
+        quantiles = np.linspace(0.0, 1.0, PRICE_PIECES + 1)
+        self._tabular_price_bounds = self._interval_bounds(filled, quantiles)
+
+    def _text_batch(self, rows: pd.DataFrame) -> TextBatch:
+        """Build a text-only sequence with no categorical or numeric positions."""
         width = self.sequence_length
-        token_ids = np.full((len(rows), width), PAD, dtype=np.int64)
-        field_ids = np.zeros((len(rows), width), dtype=np.int64)
-        mask = np.zeros((len(rows), width), dtype=bool)
+        input_ids = np.full((len(rows), width), PAD, dtype=np.int64)
+        attention_mask = np.zeros((len(rows), width), dtype=bool)
+        token_type_ids = np.zeros((len(rows), width), dtype=np.int64)
 
-        token_ids[:, 0] = CLS
-        mask[:, 0] = True
+        input_ids[:, 0] = CLS
+        attention_mask[:, 0] = True
 
-        for position, row in enumerate(rows.itertuples(index=False)):
+        for row_position, row in enumerate(rows.itertuples(index=False)):
             cursor = 1
-            for field_index, name in enumerate(self.spec.text_fields, start=1):
+            for fallback_type, name in enumerate(self.spec.text_fields):
+                token_type = _TOKEN_TYPE.get(name, fallback_type)
                 for word in tokenize(getattr(row, name)):
-                    if cursor > self._text_width:
+                    if cursor >= width:
                         break
-                    token_ids[position, cursor] = self._words.get(word, WORD_UNK)
-                    field_ids[position, cursor] = field_index
-                    mask[position, cursor] = True
+                    input_ids[row_position, cursor] = self._words.get(word, WORD_UNK)
+                    token_type_ids[row_position, cursor] = token_type
+                    attention_mask[row_position, cursor] = True
                     cursor += 1
 
-        start = 1 + self._text_width
-        field_index = 1 + len(self.spec.text_fields)
-        for offset, name in enumerate(self.spec.categorical_fields):
-            column = start + offset
-            codes = self._levels[name]
-            unknown = self._level_unknown[name]
-            token_ids[:, column] = [
-                codes.get(value, unknown) for value in categorical_column(rows, name)
-            ]
-            field_ids[:, column] = field_index + offset
-            mask[:, column] = True
+        return TextBatch(
+            input_ids=torch.from_numpy(input_ids),
+            token_type_ids=torch.from_numpy(token_type_ids),
+            attention_mask=torch.from_numpy(attention_mask),
+        )
 
-        return token_ids, field_ids, mask
+    def _tab_batch(self, rows: pd.DataFrame) -> TabBatch:
+        """Build category, allergen and price-piece blocks."""
+        x_tab = np.zeros((len(rows), TABULAR_WIDTH), dtype=np.float32)
+
+        if "category" in self.spec.categorical_fields:
+            category_index = {value: i for i, value in enumerate(CATEGORY_LEVELS)}
+            for row, value in enumerate(categorical_column(rows, "category")):
+                column = category_index.get(value)
+                if column is not None:
+                    x_tab[row, column] = 1.0
+
+        allergen_start = len(CATEGORY_LEVELS)
+        if "allergens" in self.spec.categorical_fields:
+            allergen_index = {value: i for i, value in enumerate(ALLERGEN_LEVELS)}
+            for row, value in enumerate(categorical_column(rows, "allergens")):
+                column = allergen_index.get(value)
+                if column is not None:
+                    x_tab[row, allergen_start + column] = 1.0
+
+        price_start = allergen_start + len(ALLERGEN_LEVELS)
+        if "price_position" in self.spec.numeric_fields:
+            raw = numeric_column(rows, "price_position")
+            missing = np.isnan(raw)
+            filled = np.where(missing, self._tabular_price_centre, raw)
+            x_tab[:, price_start : price_start + PRICE_PIECES] = (
+                self._ratios_for_bounds(self._tabular_price_bounds, filled)
+            )
+
+        return TabBatch(x_tab=torch.from_numpy(x_tab))
 
     def _numeric(
         self, rows: pd.DataFrame
@@ -279,7 +358,10 @@ class RowEncoder:
 
     def piecewise_ratios(self, name: str, values: np.ndarray) -> np.ndarray:
         """``(rows, n_buckets)``: how far the value travelled through each bucket."""
-        bounds = self._bounds[name]
+        return self._ratios_for_bounds(self._bounds[name], values)
+
+    @staticmethod
+    def _ratios_for_bounds(bounds: np.ndarray, values: np.ndarray) -> np.ndarray:
         lower, upper = bounds[:-1], bounds[1:]
         width = np.where(upper > lower, upper - lower, 1.0)
         travelled = (np.asarray(values, dtype=np.float64)[:, None] - lower[None, :])

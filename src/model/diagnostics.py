@@ -219,11 +219,6 @@ def position_groups(encoder, frame: pd.DataFrame, indices) -> list[list[str]]:
     rows = frame.iloc[list(indices)]
     text_width = encoder.text_width
 
-    tail = [
-        *[f"cat: {name}" for name in spec.categorical_fields],
-        *[f"num: {name}" for name in spec.numeric_fields],
-    ]
-
     from src.model.encoding import tokenize
 
     named: list[list[str]] = []
@@ -232,25 +227,26 @@ def position_groups(encoder, frame: pd.DataFrame, indices) -> list[list[str]]:
             (name, len(tokenize(getattr(row, name)))) for name in spec.text_fields
         ]
         labels: list[str] = []
-        for name, count in per_field:
-            labels.extend([name] * count)
-        labels = labels[:text_width]
-        labels += ["(padding)"] * (text_width - len(labels))
-
         phrase = getattr(row, "popularity_phrase", NO_PHRASE)
-        if phrase != NO_PHRASE and spec.text_fields and spec.text_fields[0] == "title":
-            title_tokens = per_field[0][1]
-            phrase_tokens = len(tokenize(phrase))
-            start = max(0, min(title_tokens, text_width) - phrase_tokens)
-            for position in range(start, min(title_tokens, text_width)):
-                labels[position] = PHRASE_GROUP
-            for position in range(0, start):
-                labels[position] = TITLE_REST
-        elif spec.text_fields and spec.text_fields[0] == "title":
-            for position in range(min(per_field[0][1], text_width)):
-                labels[position] = TITLE_REST
+        phrase_tokens = len(tokenize(phrase)) if phrase != NO_PHRASE else 0
+        remaining = text_width
+        for name, count in per_field:
+            kept = min(count, remaining)
+            field_labels = [name] * kept
+            if name == "title":
+                phrase_start = max(0, kept - phrase_tokens)
+                field_labels[:phrase_start] = [TITLE_REST] * phrase_start
+                if phrase_tokens:
+                    field_labels[phrase_start:] = [PHRASE_GROUP] * (
+                        kept - phrase_start
+                    )
+                else:
+                    field_labels = [TITLE_REST] * kept
+            labels.extend(field_labels)
+            remaining -= kept
 
-        named.append([CLS_GROUP, *labels, *tail])
+        labels.extend(["(padding)"] * remaining)
+        named.append([CLS_GROUP, *labels])
     return named
 
 
