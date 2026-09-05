@@ -8,8 +8,6 @@ import torch.nn as nn
 from src.model.encoding import TABULAR_WIDTH, RowEncoder, TabBatch, TextBatch
 from src.model.towers import FusionHead, TabularTower, TextTower
 
-TABULAR_OUTPUT_DIM = 16
-
 TowerBatch = tuple[TextBatch, TabBatch]
 
 
@@ -25,13 +23,15 @@ class BtrTransformer(nn.Module):
         )
         self.tabular_tower = TabularTower(
             input_dim=TABULAR_WIDTH,
-            output_dim=TABULAR_OUTPUT_DIM,
+            output_dim=config.tabular_dim,
             dropout=config.dropout,
+            architecture=config.tab_tower,
         )
         self.fusion_head = FusionHead(
             text_dim=config.d_model,
-            tabular_dim=TABULAR_OUTPUT_DIM,
+            tabular_dim=config.tabular_dim,
             dropout=config.dropout,
+            architecture=config.fusion_head,
         )
 
     def forward(self, batch: TowerBatch) -> torch.Tensor:
@@ -40,6 +40,15 @@ class BtrTransformer(nn.Module):
         h_text = self.text_tower(text_batch)
         h_tab = self.tabular_tower(tabular_batch.x_tab)
         return self.fusion_head(h_text, h_tab)
+
+    def attention_of_cls(self, batch: TowerBatch) -> torch.Tensor:
+        """What ``[CLS]`` attends to, for the interpretability slide.
+
+        Only the text tower has a sequence to attend over, so the tabular half of the
+        batch is not read.
+        """
+        text_batch, _ = batch
+        return self.text_tower.attention_of_cls(text_batch)
 
 
 def count_parameters(model: nn.Module) -> int:

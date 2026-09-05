@@ -339,9 +339,7 @@ def interpretability(
         print(f"figure: {path}")
 
     if PRICE_COLUMN not in config.numeric_fields:
-        return
-    if model.numbers is None or model.numbers.buckets is None:
-        print(f"\n  {config.name} has no bucket table, so there is no U to recover")
+        print(f"\n  {config.name} never reads {PRICE_COLUMN}: no U to recover")
         return
 
     print("\n=== DID THE PRICE BUCKETS RECOVER THE INVERTED U? ===")

@@ -27,6 +27,11 @@ n_heads            = 4
 dropout            = 0.1
 positional         = none
 pooling            = mean
+tokenizer          = wordpiece
+keep_brackets      = true
+tab_tower          = mlp
+fusion_head         = mlp
+tabular_dim         = 16
 numeric_embedding  = affine+buckets
 
 # Fixed optimisation protocol. Identical for every rung and every comparison.

@@ -43,6 +43,8 @@ POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
 
 TOKENIZERS = ("whole-word", "wordpiece")
+TAB_TOWERS = ("linear", "mlp")
+FUSION_HEADS = ("linear", "mlp")
 
 LADDER_NAME = re.compile(r"^L\d")
 """``[L0 ...]`` through ``[L4 ...]``: the rungs ``run_ladder`` walks, in file order."""
@@ -130,8 +132,11 @@ class RunConfig:
     pooling: str
     numeric_embedding: str
 
-    tokenizer: str = "whole-word"
-    keep_brackets: bool = False
+    tokenizer: str = "wordpiece"
+    keep_brackets: bool = True
+    tab_tower: str = "mlp"
+    fusion_head: str = "mlp"
+    tabular_dim: int = 16
 
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
@@ -265,8 +270,11 @@ def _run(name: str, section) -> RunConfig:
             positional=section.get("positional"),
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
-            tokenizer=section.get("tokenizer", fallback="whole-word"),
-            keep_brackets=section.getboolean("keep_brackets", fallback=False),
+            tokenizer=section.get("tokenizer", fallback="wordpiece"),
+            keep_brackets=section.getboolean("keep_brackets", fallback=True),
+            tab_tower=section.get("tab_tower", fallback="mlp"),
+            fusion_head=section.get("fusion_head", fallback="mlp"),
+            tabular_dim=section.getint("tabular_dim", fallback=16),
             learning_rate=section.getfloat("learning_rate", fallback=1e-4),
             weight_decay=section.getfloat("weight_decay", fallback=0.01),
             epochs=section.getint("epochs", fallback=60),
@@ -313,9 +321,15 @@ def _validate(config: RunConfig) -> None:
         (config.positional, POSITIONAL_ENCODINGS, "positional"),
         (config.pooling, POOLINGS, "pooling"),
         (config.tokenizer, TOKENIZERS, "tokenizer"),
+        (config.tab_tower, TAB_TOWERS, "tab_tower"),
+        (config.fusion_head, FUSION_HEADS, "fusion_head"),
     ):
         if value not in allowed:
             raise ParameterError(f"[{name}] {label}={value!r} is not one of {allowed}")
+    if config.tabular_dim < 1:
+        raise ParameterError(
+            f"[{name}] tabular_dim={config.tabular_dim} must be at least 1"
+        )
     if config.d_model % config.n_heads:
         raise ParameterError(
             f"[{name}] d_model={config.d_model} is not divisible by "
