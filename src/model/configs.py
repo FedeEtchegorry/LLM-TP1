@@ -42,6 +42,8 @@ NUMERIC_EMBEDDINGS = (
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
 
+TOKENIZERS = ("whole-word", "wordpiece")
+
 LADDER_NAME = re.compile(r"^L\d")
 """``[L0 ...]`` through ``[L4 ...]``: the rungs ``run_ladder`` walks, in file order."""
 
@@ -127,6 +129,9 @@ class RunConfig:
     positional: str
     pooling: str
     numeric_embedding: str
+
+    tokenizer: str = "whole-word"
+    keep_brackets: bool = False
 
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
@@ -260,6 +265,8 @@ def _run(name: str, section) -> RunConfig:
             positional=section.get("positional"),
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
+            tokenizer=section.get("tokenizer", fallback="whole-word"),
+            keep_brackets=section.getboolean("keep_brackets", fallback=False),
             learning_rate=section.getfloat("learning_rate", fallback=1e-4),
             weight_decay=section.getfloat("weight_decay", fallback=0.01),
             epochs=section.getint("epochs", fallback=60),
@@ -305,6 +312,7 @@ def _validate(config: RunConfig) -> None:
         (config.numeric_embedding, NUMERIC_EMBEDDINGS, "numeric_embedding"),
         (config.positional, POSITIONAL_ENCODINGS, "positional"),
         (config.pooling, POOLINGS, "pooling"),
+        (config.tokenizer, TOKENIZERS, "tokenizer"),
     ):
         if value not in allowed:
             raise ParameterError(f"[{name}] {label}={value!r} is not one of {allowed}")

@@ -238,6 +238,7 @@ results/weights/
 # Su ultima version commiteada esta en d4fe6a1 por si hace falta recuperarlas.
 ARCHITECTURE.md
 OLD_ARCHITECTURE.md
+PRESENTATION.md
 
 # Archivo de los tests de la arquitectura de una sola torre.
 tests-v1-una-torre.tar.gz

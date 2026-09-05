@@ -10,3 +10,4 @@ matplotlib
 torch
 transformers
 sentence-transformers
+tokenizers

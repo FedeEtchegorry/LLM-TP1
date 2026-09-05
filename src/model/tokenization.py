@@ -1,201 +1,217 @@
-"""Whether the shared-token hypothesis explains part of the AP gap against L0.
+"""How a string becomes a list of integers, on two independent axes.
 
-    .venv/bin/python -m src.model.tokenization
-    .venv/bin/python -m src.model.tokenization --fold 2
++----------------+-------------------------------+------------------------------+
+|                | ``keep_brackets = false``     | ``keep_brackets = true``     |
++================+===============================+==============================+
+| ``whole-word`` | the first delivery, verbatim  | whole words **plus**         |
+|                | -- all punctuation deleted    | punctuation as tokens        |
++----------------+-------------------------------+------------------------------+
+| ``wordpiece``  | the control: brackets removed | the proposal: BERT's         |
+|                | on purpose, rest untouched    | pipeline as it is            |
++----------------+-------------------------------+------------------------------+
 
-L0 gives every ``popularity_phrase`` its own free weight through a one-hot column.
-The Transformer instead runs the phrase through ``encoding.tokenize`` -- whole-word
-splitting, not subwords -- and every resulting word gets one shared row in the token
-embedding table, fit only on training rows (``encoding.RowEncoder._fit_words``). If
-two phrases as far apart in BTR as "Customer Favorite" and "Shopper Favorite" turn
-out to share a token -- or both fall outside the training vocabulary and both land on
-the same ``WORD_UNK`` row, which is the same coupling by a different route -- their
-embeddings start out identical at the input layer, before any attention runs.
-
-This measures whether that coupling exists. It does not train anything, load any
-weights, or touch the test rows: the vocabulary is fit on one fold's training rows,
-exactly as ``RowEncoder.fit`` would for a real run, and BTR is read off the
-development rows (train + validation, across every fold) so a rare phrase is not
-priced off a few hundred training rows alone.
 """
 
 from __future__ import annotations
 
-import argparse
-from itertools import combinations
+import re
+from typing import Iterable, Protocol, Self
 
-import pandas as pd
+PAD, UNK, CLS, SEP = 0, 1, 2, 3
+SPECIAL_TOKENS: tuple[str, ...] = ("[PAD]", "[UNK]", "[CLS]", "[SEP]")
+N_SPECIAL = len(SPECIAL_TOKENS)
+"""``[PAD]`` is id 0 so it can stay the token embedding's ``padding_idx``. There is no
+``[MASK]``: no masked-language-modelling stage exists"""
 
-from src.eda.loading import NO_PHRASE, load_dataset
-from src.model.baseline import target_of
-from src.model.configs import PROTOCOL
-from src.model.encoding import EncodingSpec, RowEncoder, WORD_UNK, tokenize
-from src.model.experiment import partition
+CONTINUATION = "##"
+DEFAULT_VOCABULARY_SIZE = 3_000
+DEFAULT_MIN_FREQUENCY = 1
+"""One occurrence is enough. The corpus has 422 distinct words and zero hapax, so a
+higher threshold would only discard subword units we can afford to keep."""
 
-PHRASE_COLUMN = "popularity_phrase"
+BRACKETS = ("(", ")")
+
+WHOLE_WORD = "whole-word"
+WORDPIECE = "wordpiece"
+FAMILIES: tuple[str, ...] = (WHOLE_WORD, WORDPIECE)
+
+_WORDS_ONLY = re.compile(r"[a-z0-9]+")
+_WORDS_AND_PUNCTUATION = re.compile(r"[a-z0-9]+|[^\sa-z0-9]")
 
 
-def fit_vocabulary(frame: pd.DataFrame, train_indices) -> RowEncoder:
-    """The real fitting path, not a reimplementation of it -- so this reflects
-    exactly what a training run would see, never an approximation of it."""
-    return RowEncoder(EncodingSpec()).fit(frame, train_indices)
+class Tokenizer(Protocol):
+    family: str
+    keep_brackets: bool
+    name: str
+
+    def fit(self, texts: Iterable[str]) -> Self: ...
+
+    def tokens(self, text: object) -> list[str]: ...
+
+    def encode(self, text: object) -> list[int]: ...
+
+    @property
+    def vocabulary_size(self) -> int: ...
+
+    @property
+    def vocabulary(self) -> dict[str, int]: ...
 
 
-def phrase_records(frame: pd.DataFrame, encoder: RowEncoder, rate_indices) -> dict:
-    """Per distinct phrase: its tokens, their vocabulary ids, and its BTR.
+class WholeWordTokenizer:
+    """Whole words, with punctuation either deleted or kept as its own token.
 
-    ``encoder._words`` is a private attribute; this reaches into it on purpose
-    rather than duplicating ``_fit_words`` -- it is read-only introspection for a
-    diagnostic, not a second implementation that could drift from the real one.
+    With ``keep_brackets=False`` this is byte-for-byte the first delivery's
+    ``encoding.tokenize``: it is the baseline the reported v1 numbers were measured
+    on, so it is kept identical rather than reimplemented. Unknown words all collapse
+    onto a single ``[UNK]`` row, which is one of the reasons subwords are worth trying.
     """
-    words = encoder._words  # noqa: SLF001 -- intentional, see docstring
-    target = target_of(frame)
-    rated = frame.iloc[list(rate_indices)]
-    rated_target = target[list(rate_indices)]
-    rated_phrase = rated[PHRASE_COLUMN].to_numpy()
 
-    phrases = sorted(value for value in frame[PHRASE_COLUMN].unique() if value != NO_PHRASE)
-    records = {}
-    for phrase in phrases:
-        tokens = tokenize(phrase)
-        ids = [words.get(token, WORD_UNK) for token in tokens]
-        mask = rated_phrase == phrase
-        records[phrase] = {
-            "tokens": tokens,
-            "ids": ids,
-            "n_rows": int(mask.sum()),
-            "btr": float(rated_target[mask].mean()) if mask.any() else float("nan"),
+    family = WHOLE_WORD
+
+    def __init__(self, keep_brackets: bool = False) -> None:
+        self.keep_brackets = keep_brackets
+        self.name = f"{WHOLE_WORD}+punct" if keep_brackets else WHOLE_WORD
+        self._pattern = _WORDS_AND_PUNCTUATION if keep_brackets else _WORDS_ONLY
+        self._words: dict[str, int] = {}
+        self._fitted = False
+
+    def fit(self, texts: Iterable[str]) -> Self:
+        seen: set[str] = set()
+        for text in texts:
+            seen.update(self.tokens(text))
+        self._words = {
+            word: N_SPECIAL + position for position, word in enumerate(sorted(seen))
         }
-    return records
+        self._fitted = True
+        return self
+
+    def tokens(self, text: object) -> list[str]:
+        return self._pattern.findall(str(text).lower())
+
+    def encode(self, text: object) -> list[int]:
+        self._require_fitted()
+        return [self._words.get(token, UNK) for token in self.tokens(text)]
+
+    @property
+    def vocabulary_size(self) -> int:
+        return N_SPECIAL + len(self._words)
+
+    @property
+    def vocabulary(self) -> dict[str, int]:
+        return dict(zip(SPECIAL_TOKENS, range(N_SPECIAL))) | self._words
+
+    def _require_fitted(self) -> None:
+        if not self._fitted:
+            raise RuntimeError(f"the {self.name} tokenizer was never fitted")
 
 
-def _id_to_word(encoder: RowEncoder) -> dict:
-    words = encoder._words  # noqa: SLF001
-    return {token_id: word for word, token_id in words.items()}
+class WordPieceTokenizer:
+    """BERT's tokenizer, with its vocabulary trained on our corpus rather than loaded.
 
+    The four canonical pieces, in the order they run:
 
-def _label(token: str, token_id: int) -> str:
-    return token if token_id != WORD_UNK else f"{token}[UNK]"
+    ==============  =========================================================
+    Normalizer      NFKC, strip accents, lowercase
+    Pre-tokenizer   ``BertPreTokenizer``: splits on whitespace **and emits each
+                    punctuation character as its own token**
+    Model           WordPiece, greedy longest-match-first, ``##`` marking a
+                    continuation (``steamable`` -> ``steam`` ``##able``)
+    Trainer         ``WordPieceTrainer``, merging pairs by likelihood ratio
+    ==============  =========================================================
 
+    With ``keep_brackets=False`` the brackets are replaced by spaces before anything
+    else runs, and every other punctuation mark is left where it is.
 
-def phrase_frame(records: dict, encoder: RowEncoder) -> pd.DataFrame:
-    """One row per phrase: its tokenization, and which of its tokens recur
-    elsewhere in the popularity-phrase vocabulary -- shared by id, so two
-    out-of-vocabulary words sharing ``WORD_UNK`` count as shared too."""
-    id_to_word = _id_to_word(encoder)
-    rows = []
-    for phrase, record in records.items():
-        shared_ids: set[int] = set()
-        for other, other_record in records.items():
-            if other == phrase:
-                continue
-            shared_ids |= set(record["ids"]) & set(other_record["ids"])
-        shared_tokens = sorted(
-            id_to_word.get(token_id, "[UNK]") if token_id != WORD_UNK else "[UNK]"
-            for token_id in shared_ids
+    """
+
+    family = WORDPIECE
+
+    def __init__(
+        self,
+        keep_brackets: bool = True,
+        vocabulary_size: int = DEFAULT_VOCABULARY_SIZE,
+        min_frequency: int = DEFAULT_MIN_FREQUENCY,
+    ) -> None:
+        self.keep_brackets = keep_brackets
+        self.name = WORDPIECE if keep_brackets else f"{WORDPIECE}-no-brackets"
+        self.target_vocabulary_size = vocabulary_size
+        self.min_frequency = min_frequency
+        self._tokenizer = None
+
+    def fit(self, texts: Iterable[str]) -> Self:
+        models, normalizers, pre_tokenizers, trainers, HFTokenizer = _tokenizers()
+
+        tokenizer = HFTokenizer(
+            models.WordPiece(unk_token="[UNK]", continuing_subword_prefix=CONTINUATION)
         )
-        rows.append(
-            {
-                "phrase": phrase,
-                "tokens": " ".join(
-                    _label(token, token_id)
-                    for token, token_id in zip(record["tokens"], record["ids"])
-                ),
-                "n_tokens": len(record["tokens"]),
-                "shared_tokens": ", ".join(shared_tokens) or "-",
-                "n_rows": record["n_rows"],
-                "btr": record["btr"],
-            }
+        tokenizer.normalizer = normalizers.Sequence(
+            [normalizers.NFKC(), normalizers.StripAccents(), normalizers.Lowercase()]
         )
-    return (
-        pd.DataFrame(rows)
-        .sort_values("btr", ascending=False)
-        .reset_index(drop=True)
-    )
-
-
-def pair_frame(records: dict, encoder: RowEncoder) -> pd.DataFrame:
-    """One row per pair of phrases: how many tokens they share (by id) and how far
-    apart their BTR is. Sorted by BTR gap descending -- the pairs where sharing a
-    token would matter most sit at the top."""
-    id_to_word = _id_to_word(encoder)
-    rows = []
-    for left, right in combinations(records, 2):
-        left_ids, right_ids = set(records[left]["ids"]), set(records[right]["ids"])
-        shared_ids = left_ids & right_ids
-        shared_tokens = sorted(
-            id_to_word.get(token_id, "[UNK]") if token_id != WORD_UNK else "[UNK]"
-            for token_id in shared_ids
+        tokenizer.pre_tokenizer = pre_tokenizers.BertPreTokenizer()
+        trainer = trainers.WordPieceTrainer(
+            vocab_size=self.target_vocabulary_size,
+            min_frequency=self.min_frequency,
+            special_tokens=list(SPECIAL_TOKENS),
+            continuing_subword_prefix=CONTINUATION,
+            show_progress=False,
         )
-        rows.append(
-            {
-                "phrase_a": left,
-                "phrase_b": right,
-                "n_shared": len(shared_ids),
-                "shared_tokens": ", ".join(shared_tokens) or "-",
-                "btr_a": records[left]["btr"],
-                "btr_b": records[right]["btr"],
-                "btr_gap": abs(records[left]["btr"] - records[right]["btr"]),
-            }
-        )
-    return (
-        pd.DataFrame(rows)
-        .sort_values("btr_gap", ascending=False)
-        .reset_index(drop=True)
-    )
+        tokenizer.train_from_iterator((self._prepare(text) for text in texts), trainer)
+        self._tokenizer = tokenizer
+        return self
+
+    def tokens(self, text: object) -> list[str]:
+        return self._encoding(text).tokens
+
+    def encode(self, text: object) -> list[int]:
+        return self._encoding(text).ids
+
+    @property
+    def vocabulary_size(self) -> int:
+        self._require_fitted()
+        return self._tokenizer.get_vocab_size()
+
+    @property
+    def vocabulary(self) -> dict[str, int]:
+        self._require_fitted()
+        return self._tokenizer.get_vocab()
+
+    def _prepare(self, text: object) -> str:
+        prepared = str(text)
+        if self.keep_brackets:
+            return prepared
+        for bracket in BRACKETS:
+            prepared = prepared.replace(bracket, " ")
+        return prepared
+
+    def _encoding(self, text: object):
+        self._require_fitted()
+        return self._tokenizer.encode(self._prepare(text), add_special_tokens=False)
+
+    def _require_fitted(self) -> None:
+        if self._tokenizer is None:
+            raise RuntimeError(f"the {self.name} tokenizer was never fitted")
 
 
-def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--fold", type=int, default=0, help="which fold's training rows fit the vocabulary"
-    )
-    return parser.parse_args(argv)
+def tokenizer_for(family: str, keep_brackets: bool, **options) -> Tokenizer:
+    if family not in FAMILIES:
+        raise ValueError(f"unknown tokenizer {family!r}; expected one of {FAMILIES}")
+    if family == WHOLE_WORD:
+        if options:
+            raise ValueError("the whole-word tokenizer takes no options")
+        return WholeWordTokenizer(keep_brackets=keep_brackets)
+    return WordPieceTokenizer(keep_brackets=keep_brackets, **options)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    frame = load_dataset(PROTOCOL.dataset)
-    partitions = partition(frame)
-    train_indices = partitions.folds[args.fold].train_indices
-
-    encoder = fit_vocabulary(frame, train_indices)
-    records = phrase_records(frame, encoder, partitions.development_indices)
-
-    print(
-        f"vocabulario ajustado sobre {len(train_indices)} filas de train "
-        f"(fold {args.fold}), {len(encoder._words)} palabras distintas"  # noqa: SLF001
-    )
-    print(
-        f"BTR calculado sobre {len(partitions.development_indices)} filas "
-        "(train + validacion de todos los folds, nunca test)"
-    )
-    print(f"{len(records)} frases de popularidad distintas de {NO_PHRASE!r}")
-
-    print("\n=== FRASES: TOKENIZACION Y BTR ===")
-    table = phrase_frame(records, encoder)
-    display = table.assign(btr=lambda d: (d["btr"] * 100).map("{:.1f}%".format))
-    print(display.to_string(index=False))
-
-    print("\n=== PARES: TOKENS COMPARTIDOS FRENTE A LA DIFERENCIA DE BTR ===")
-    pairs = pair_frame(records, encoder)
-    display = pairs.assign(
-        btr_a=lambda d: (d["btr_a"] * 100).map("{:.1f}%".format),
-        btr_b=lambda d: (d["btr_b"] * 100).map("{:.1f}%".format),
-        btr_gap=lambda d: (d["btr_gap"] * 100).map("{:.1f} pp".format),
-    )
-    print(display.to_string(index=False))
-
-    shared = pairs[pairs["n_shared"] > 0]
-    if shared.empty:
-        print("\nninguna frase comparte un token con otra: la hipotesis no aplica aqui")
-    else:
-        print(
-            f"\n{len(shared)} de {len(pairs)} pares comparten al menos un token; "
-            f"brecha de BTR promedio en esos pares: {shared['btr_gap'].mean() * 100:.1f} pp"
-        )
-    return 0
+def lengths(tokenizer: Tokenizer, texts: Iterable[str]) -> list[int]:
+    return [len(tokenizer.encode(text)) for text in texts]
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def _tokenizers():
+    try:
+        from tokenizers import Tokenizer as HFTokenizer
+        from tokenizers import models, normalizers, pre_tokenizers, trainers
+    except ImportError as error:  # pragma: no cover -- environment, not logic
+        raise ImportError(
+            "WordPiece needs the 'tokenizers' package: pip install -r requirements.txt"
+        ) from error
+    return models, normalizers, pre_tokenizers, trainers, HFTokenizer
