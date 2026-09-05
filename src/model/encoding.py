@@ -2,8 +2,8 @@
 
 ``RowEncoder.transform`` deliberately returns two independent batches. Text keeps
 only ``[CLS]`` and word-token positions, while the tabular branch has a stable
-30-column contract. Anything learned from data (the word vocabulary and the price
-interval bounds) is still fitted only on the training rows of a fold.
+30-column contract. Anything learned from data (the tokenizer's vocabulary and the
+price interval bounds) is still fitted only on the training rows of a fold.
 
 """
 
@@ -18,15 +18,20 @@ import pandas as pd
 import torch
 
 from src.eda.aspects.composition import NO_ALLERGENS, NUTRITION_SENTINEL
+from src.model.tokenization import (
+    CLS,
+    PAD,
+    WORDPIECE,
+    Tokenizer,
+    tokenizer_for,
+)
+from src.model.tokenization import UNK as WORD_UNK
 
 TEXT_FIELDS: tuple[str, ...] = ("title", "description", "ingredients")
 CATEGORICAL_FIELDS: tuple[str, ...] = ("category", "allergens")
 NUMERIC_FIELDS: tuple[str, ...] = ("price_position",)
 SENTINEL_FIELDS: frozenset[str] = frozenset({"nutrition_score"})
 """Columns where a literal zero means "not applicable" rather than a low score."""
-
-PAD, WORD_UNK, CLS = 0, 1, 2
-N_SPECIAL = 3
 
 CATEGORY_LEVELS: tuple[str, ...] = (
     "Baby",
@@ -54,6 +59,10 @@ ALLERGEN_LEVELS: tuple[str, ...] = (
 )
 PRICE_PIECES = 10
 TABULAR_WIDTH = len(CATEGORY_LEVELS) + len(ALLERGEN_LEVELS) + PRICE_PIECES
+PRICE_START = len(CATEGORY_LEVELS) + len(ALLERGEN_LEVELS)
+PRICE_SLICE = slice(PRICE_START, PRICE_START + PRICE_PIECES)
+"""Where the ten price pieces sit inside ``x_tab``, for whoever has to read or
+rewrite them: the counterfactual sweep and the price-axis diagnostic."""
 
 _TOKEN_TYPE = {name: position for position, name in enumerate(TEXT_FIELDS)}
 
@@ -61,9 +70,18 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 
 
 def tokenize(text: object) -> list[str]:
-    if text is None or pd.isna(text):
-        return []
-    return _TOKEN.findall(str(text).lower())
+    """The plain word regex, kept for the linear baseline and the bag of embeddings.
+
+    The Transformer reads the tokenizer its run declares instead.
+    """
+    return _TOKEN.findall(text_or_empty(text).lower())
+
+
+def text_or_empty(value: object) -> str:
+    """Missing text is no text. Without this, ``NaN`` becomes the word ``nan``."""
+    if value is None or pd.isna(value):
+        return ""
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -74,7 +92,13 @@ class EncodingSpec:
     categorical_fields: tuple[str, ...] = CATEGORICAL_FIELDS
     numeric_fields: tuple[str, ...] = NUMERIC_FIELDS
     n_buckets: int = 10
+    tokenizer: str = WORDPIECE
+    keep_brackets: bool = True
+    """WordPiece with the parentheses is the architecture; the word regex stays
+    reachable as the ablation's control. Both reach the run's digest."""
     max_text_tokens: int = 64
+    """Ceiling on the word positions the three fields share; the width actually used is
+    the longest training row, which is refitted per fold."""
 
     def __post_init__(self) -> None:
         if not (self.text_fields or self.categorical_fields or self.numeric_fields):
@@ -168,7 +192,7 @@ class RowEncoder:
     """Fits its vocabulary and statistics on training rows, then encodes any rows."""
 
     spec: EncodingSpec = field(default_factory=EncodingSpec)
-    _words: dict[str, int] = field(default_factory=dict, init=False)
+    _tokenizer: Tokenizer | None = field(default=None, init=False)
     _centres: dict[str, float] = field(default_factory=dict, init=False)
     _scales: dict[str, float] = field(default_factory=dict, init=False)
     _edges: dict[str, np.ndarray] = field(default_factory=dict, init=False)
@@ -182,7 +206,8 @@ class RowEncoder:
 
     def fit(self, frame: pd.DataFrame, train_indices) -> Self:
         training = frame.iloc[list(train_indices)]
-        self._fit_words(training)
+        self._fit_tokenizer(training)
+        self._fit_width(training)
         self._fit_numbers(training)
         self._fit_tabular_price(training)
         self._fitted = True
@@ -198,14 +223,22 @@ class RowEncoder:
         return self._text_batch(rows), self._tab_batch(rows)
 
     @property
-    def vocabulary_size(self) -> int:
-        """Size of the text-only vocabulary, including the three special tokens."""
-        return N_SPECIAL + len(self._words)
+    def tokenizer(self) -> Tokenizer:
+        if self._tokenizer is None:
+            raise RuntimeError("the encoder was never fitted")
+        return self._tokenizer
 
     @property
-    def n_fields(self) -> int:
-        """One field identifier for ``[CLS]`` and one per discrete column."""
-        return 1 + len(self.spec.text_fields) + len(self.spec.categorical_fields)
+    def vocabulary_size(self) -> int:
+        """Rows the token embedding table needs, specials included."""
+        return self.tokenizer.vocabulary_size
+
+    def tokens(self, text: object) -> list[str]:
+        return self.tokenizer.tokens(text_or_empty(text))
+
+    def encode(self, text: object) -> list[int]:
+        """The same tokens as ids, with no special token added."""
+        return self.tokenizer.encode(text_or_empty(text))
 
     @property
     def sequence_length(self) -> int:
@@ -229,16 +262,24 @@ class RowEncoder:
         """Put raw values on the scale the network was trained to read them on."""
         return (values - self._centres[name]) / self._scales[name]
 
-    def _fit_words(self, training: pd.DataFrame) -> None:
-        seen: set[str] = set()
+    def _fit_tokenizer(self, training: pd.DataFrame) -> None:
+        texts = [
+            text_or_empty(value)
+            for name in self.spec.text_fields
+            for value in training[name]
+        ]
+        self._tokenizer = tokenizer_for(
+            self.spec.tokenizer, self.spec.keep_brackets
+        ).fit(texts)
+
+    def _fit_width(self, training: pd.DataFrame) -> None:
+        """The widest training row, capped: the sequence is as long as the fold needs."""
         longest = 0
-        for _, row in training[list(self.spec.text_fields)].iterrows():
-            tokens = [token for name in self.spec.text_fields for token in tokenize(row[name])]
-            seen.update(tokens)
-            longest = max(longest, len(tokens))
-        self._words = {
-            word: N_SPECIAL + position for position, word in enumerate(sorted(seen))
-        }
+        for row in training.itertuples(index=False):
+            longest = max(
+                longest,
+                sum(len(self.encode(getattr(row, name))) for name in self.spec.text_fields),
+            )
         self._text_width = min(longest, self.spec.max_text_tokens)
 
     def _fit_numbers(self, training: pd.DataFrame) -> None:
@@ -288,12 +329,12 @@ class RowEncoder:
 
         for row_position, row in enumerate(rows.itertuples(index=False)):
             cursor = 1
-            for fallback_type, name in enumerate(self.spec.text_fields):
-                token_type = _TOKEN_TYPE.get(name, fallback_type)
-                for word in tokenize(getattr(row, name)):
+            for position, name in enumerate(self.spec.text_fields):
+                token_type = _TOKEN_TYPE.get(name, position)
+                for token in self.encode(getattr(row, name)):
                     if cursor >= width:
                         break
-                    input_ids[row_position, cursor] = self._words.get(word, WORD_UNK)
+                    input_ids[row_position, cursor] = token
                     token_type_ids[row_position, cursor] = token_type
                     attention_mask[row_position, cursor] = True
                     cursor += 1
@@ -323,14 +364,10 @@ class RowEncoder:
                 if column is not None:
                     x_tab[row, allergen_start + column] = 1.0
 
-        price_start = allergen_start + len(ALLERGEN_LEVELS)
         if "price_position" in self.spec.numeric_fields:
             raw = numeric_column(rows, "price_position")
-            missing = np.isnan(raw)
-            filled = np.where(missing, self._tabular_price_centre, raw)
-            x_tab[:, price_start : price_start + PRICE_PIECES] = (
-                self._ratios_for_bounds(self._tabular_price_bounds, filled)
-            )
+            filled = np.where(np.isnan(raw), self._tabular_price_centre, raw)
+            x_tab[:, PRICE_SLICE] = self.tabular_price_ratios(filled)
 
         return TabBatch(x_tab=torch.from_numpy(x_tab))
 
@@ -355,6 +392,10 @@ class RowEncoder:
             ratios[:, column, :] = self.piecewise_ratios(name, filled)
 
         return values, buckets, missing, ratios
+
+    def tabular_price_ratios(self, values: np.ndarray) -> np.ndarray:
+        """``(len(values), PRICE_PIECES)``: the price block ``x_tab`` would carry."""
+        return self._ratios_for_bounds(self._tabular_price_bounds, values)
 
     def piecewise_ratios(self, name: str, values: np.ndarray) -> np.ndarray:
         """``(rows, n_buckets)``: how far the value travelled through each bucket."""

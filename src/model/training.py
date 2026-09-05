@@ -74,6 +74,8 @@ def spec_for(config: RunConfig) -> EncodingSpec:
         categorical_fields=config.categorical_fields,
         numeric_fields=config.numeric_fields,
         n_buckets=TRAINING.n_buckets,
+        tokenizer=config.tokenizer,
+        keep_brackets=config.keep_brackets,
         max_text_tokens=TRAINING.max_text_tokens,
     )
 

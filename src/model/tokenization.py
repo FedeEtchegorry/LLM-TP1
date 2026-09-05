@@ -140,6 +140,7 @@ class WordPieceTokenizer:
 
     def fit(self, texts: Iterable[str]) -> Self:
         models, normalizers, pre_tokenizers, trainers, HFTokenizer = _tokenizers()
+        corpus = [self._prepare(text) for text in texts]
 
         tokenizer = HFTokenizer(
             models.WordPiece(unk_token="[UNK]", continuing_subword_prefix=CONTINUATION)
@@ -155,7 +156,12 @@ class WordPieceTokenizer:
             continuing_subword_prefix=CONTINUATION,
             show_progress=False,
         )
-        tokenizer.train_from_iterator((self._prepare(text) for text in texts), trainer)
+        tokenizer.train_from_iterator(corpus, trainer)
+        tokenizer.model = models.WordPiece(
+            vocab=_canonical_ids(_settled_vocabulary(tokenizer, corpus)),
+            unk_token="[UNK]",
+            continuing_subword_prefix=CONTINUATION,
+        )
         self._tokenizer = tokenizer
         return self
 
@@ -190,6 +196,35 @@ class WordPieceTokenizer:
     def _require_fitted(self) -> None:
         if self._tokenizer is None:
             raise RuntimeError(f"the {self.name} tokenizer was never fitted")
+
+
+def _settled_vocabulary(tokenizer, corpus: list[str]) -> set[str]:
+    """The trained vocabulary, minus the pieces the corpus never actually uses.
+
+    ``WordPieceTrainer`` walks hash maps: two runs learn the same segmentation but keep
+    different leftovers, and that is what moves the ids. The alphabet stays, so a word
+    train never saw decomposes into characters instead of collapsing onto ``[UNK]``.
+    """
+    used = {
+        token
+        for encoding in tokenizer.encode_batch(corpus, add_special_tokens=False)
+        for token in encoding.tokens
+    }
+    alphabet = {
+        token
+        for token in tokenizer.get_vocab()
+        if len(token) == 1 or (token.startswith(CONTINUATION) and len(token) == 3)
+    }
+    return used | alphabet
+
+
+def _canonical_ids(tokens: Iterable[str]) -> dict[str, int]:
+    """The same tokens, numbered so the ids never depend on the trainer's hash order."""
+    learned = sorted(token for token in tokens if token not in SPECIAL_TOKENS)
+    return {
+        token: position
+        for position, token in enumerate([*SPECIAL_TOKENS, *learned])
+    }
 
 
 def tokenizer_for(family: str, keep_brackets: bool, **options) -> Tokenizer:
