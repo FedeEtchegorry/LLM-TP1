@@ -1,7 +1,7 @@
 """Self-attention written by hand, from the course notebook, made encoder-only.
 
-Kept from ``clase2_step_by_step_transformer.ipynb``: the class names, the shapes and
-the pre-LN block, so the filiation with the class material stays visible.
+Kept from ``clase2_step_by_step_transformer.ipynb``: the class names and shapes, so
+the filiation with the class material stays visible.
 
 Changed, each change a design decision:
 
@@ -15,6 +15,8 @@ Changed, each change a design decision:
   where ``k.shape[-1]`` *is* ``head_size``. The net scaling is ``1/d_k`` instead of
   ``1/sqrt(d_k)``, which flattens attention towards a uniform average; at
   ``head_size=16`` the scores come out four times too small.
+- **Post-LN and GELU.** Each residual sum is normalized afterwards and the
+  position-wise FFN uses BERT's activation.
 """
 
 from __future__ import annotations
@@ -96,7 +98,7 @@ class FeedFoward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(4 * n_embd, n_embd),
             nn.Dropout(dropout),
         )
@@ -106,7 +108,7 @@ class FeedFoward(nn.Module):
 
 
 class Block(nn.Module):
-    """Pre-LN block: normalise, sublayer, add back onto the residual stream."""
+    """Post-LN block: sublayer, residual sum, then normalization."""
 
     def __init__(
         self, n_embd: int, n_head: int, dropout: float
@@ -127,11 +129,9 @@ class Block(nn.Module):
         return_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if return_weights:
-            attended, weights = self.sa(
-                self.ln1(x), padding_mask, return_weights=True
-            )
+            attended, weights = self.sa(x, padding_mask, return_weights=True)
         else:
-            attended, weights = self.sa(self.ln1(x), padding_mask), None
-        x = x + attended
-        x = x + self.ffwd(self.ln2(x))
+            attended, weights = self.sa(x, padding_mask), None
+        x = self.ln1(x + attended)
+        x = self.ln2(x + self.ffwd(x))
         return (x, weights) if return_weights else x
