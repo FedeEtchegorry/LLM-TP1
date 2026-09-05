@@ -5,7 +5,7 @@ architecture grid: depth and width are ordered paths, while heads are resolved
 as competing alternatives to the four-head configuration.
 
     .venv/Scripts/python -m scripts.run_architecture \
-        --parameters parameters-eda.txt --results results/eda-contract
+        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
 """
 
 from __future__ import annotations

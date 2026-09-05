@@ -1,7 +1,7 @@
 """La comparación final: el mejor lineal contra el mejor Transformer, en el holdout.
 
     .venv/Scripts/python -m scripts.run_final_comparison \
-        --parameters parameters-eda.txt --results results/eda-contract
+        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
 
 **Se corre una sola vez**, sobre dos modelos congelados antes de abrir el conjunto.
 

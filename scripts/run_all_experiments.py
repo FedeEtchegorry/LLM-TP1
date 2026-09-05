@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 
 PARAMETERS = "parameters-eda.txt"
-RESULTS = "results/eda-contract"
+RESULTS = "results/v1-una-torre/eda-contract"
 FINAL_RESULTS = f"{RESULTS}/final"
 AUDIT_OUTPUT = f"{RESULTS}/audit.md"
 GREEDY_OUTPUT = f"{RESULTS}/architecture/greedy-validation.json"

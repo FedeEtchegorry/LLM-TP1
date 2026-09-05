@@ -1,7 +1,7 @@
 """La ablación que aísla la autoatención: la arquitectura elegida con cero bloques.
 
     .venv/Scripts/python -m scripts.run_attention_ablation \
-        --results results/eda-contract
+        --results results/v1-una-torre/eda-contract
 
 Compara la arquitectura elegida contra esa misma arquitectura con ``n_layers = 0``: un
 solo campo de diferencia. ``L1`` no sirve para esto porque difiere en cuatro.

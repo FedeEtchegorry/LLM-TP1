@@ -1,7 +1,7 @@
 """Búsqueda por bracket adaptativo: tres variantes por eje, y se extiende si gana un borde.
 
     .venv/Scripts/python -m scripts.run_bracket_search \
-        --parameters parameters-eda.txt --results results/eda-contract
+        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
 
 Gana la media más alta sobre tres semillas, sin margen ni desempate por dispersión.
 Los topes de cada eje están en ``LADDERS``.

@@ -21,7 +21,19 @@ import pandas as pd
 from src.model.configs import PROTOCOL, TRAINING, RunConfig
 from src.model.protocol import EvaluationResult, FoldScore
 
-RESULTS_DIR = Path("results")
+V1_RESULTS_DIR = Path("results/v1-una-torre")
+"""La arquitectura de una sola torre: la escalera L0a-L0b, la busqueda dirigida y
+el holdout ya abierto. Es evidencia congelada de la primera entrega -- se lee, no
+se reescribe. Los runners congelados la piden explicitamente con ``--results``."""
+
+RESULTS_DIR = Path("results/v2-dos-torres")
+"""Donde escriben las corridas nuevas, y el default de todo el modulo.
+
+Que el default apunte a v2 y no a la raiz es deliberado. Una corrida que no
+encuentra su digest no falla: entrena de nuevo y graba. Si el default siguiera
+siendo comun a las dos arquitecturas, una corrida de dos torres podria aterrizar
+al lado de los numeros que cita el informe, y nada lo avisaria."""
+
 WEIGHTS_DIR = "weights"
 """Trained parameters, one file per fold. Regenerable, so ``.gitignore`` skips them."""
 

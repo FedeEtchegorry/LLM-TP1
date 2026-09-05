@@ -1,7 +1,7 @@
 """The four pre-holdout decision charts of the Ejercicio 2 flow.
 
     .venv/bin/python -m scripts.run_eda_contract_figures \
-        --results results/eda-contract --figures figures/eda-contract
+        --results results/v1-una-torre/eda-contract --figures figures/eda-contract
 
 All four charts use recorded evidence. The architecture path and greedy neighbourhood
 are reconstructed from the real five-fold run records when the summary JSONs predate
@@ -181,7 +181,7 @@ def chart_1_representations(results: str, figures: Path) -> Path | None:
     sweep = read_sweep(results)
     if sweep.empty:
         print(
-            "  [1] falta results/eda-contract/embeddings/linear-sweep.csv "
+            "  [1] falta results/v1-una-torre/eda-contract/embeddings/linear-sweep.csv "
             "(correr scripts.run_embeddings --results <resultados>)"
         )
         return None

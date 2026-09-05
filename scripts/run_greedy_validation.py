@@ -1,7 +1,7 @@
 """Whether the directed path's own order decided where it stopped.
 
     .venv/Scripts/python -m scripts.run_greedy_validation \
-        --parameters parameters-eda.txt --results results/eda-contract
+        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
 
 Task 5 walks depth, then width, then heads, resolving each axis against the winner
 of the previous one.  That visits seven of twenty-seven capacity points and admits

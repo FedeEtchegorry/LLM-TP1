@@ -57,7 +57,7 @@ tres.
 ### Representación de cada columna
 
 ```bash
-.venv/bin/python -m scripts.run_embeddings --results results/eda-contract
+.venv/bin/python -m scripts.run_embeddings --results results/v1-una-torre/eda-contract
 ```
 
 Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
@@ -65,8 +65,8 @@ Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
 ### Búsqueda de arquitectura
 
 ```bash
-.venv/bin/python -m scripts.run_bracket_search --results results/eda-contract
-.venv/bin/python -m scripts.run_attention_ablation --results results/eda-contract
+.venv/bin/python -m scripts.run_bracket_search --results results/v1-una-torre/eda-contract
+.venv/bin/python -m scripts.run_attention_ablation --results results/v1-una-torre/eda-contract
 ```
 
 Escriben `architecture/bracket-search.json` y `architecture/attention-ablation.json`.
@@ -74,8 +74,8 @@ Escriben `architecture/bracket-search.json` y `architecture/attention-ablation.j
 ### Evaluación final
 
 ```bash
-.venv/bin/python -m scripts.run_final_comparison --results results/eda-contract
-.venv/bin/python -m scripts.run_ceiling_holdout --results results/eda-contract
+.venv/bin/python -m scripts.run_final_comparison --results results/v1-una-torre/eda-contract
+.venv/bin/python -m scripts.run_ceiling_holdout --results results/v1-una-torre/eda-contract
 ```
 
 **Se corren una vez.** Enfrentan dos modelos congelados antes de abrir el holdout, y
@@ -91,9 +91,9 @@ escriben `final/comparison.json` y `final/ceiling.json`.
 
 ```bash
 .venv/bin/python -m scripts.run_eda_contract_figures \
-    --results results/eda-contract --figures figures/eda-contract
+    --results results/v1-una-torre/eda-contract --figures figures/eda-contract
 .venv/bin/python -m scripts.run_figures \
-    --results results/eda-contract --figures figures/final-bracket
+    --results results/v1-una-torre/eda-contract --figures figures/final-bracket
 ```
 
 Ninguna entrena: leen los JSON y las predicciones guardadas.
@@ -113,7 +113,7 @@ métricas por fold y las curvas por época. Una corrida ya registrada no se vuel
 entrenar, así que un barrido se puede cortar y retomar.
 
 ```bash
-.venv/bin/python -m src.model.results --directory results/eda-contract
+.venv/bin/python -m src.model.results --directory results/v1-una-torre/eda-contract
 ```
 
 ```python
