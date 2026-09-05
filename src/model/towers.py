@@ -90,7 +90,9 @@ class TextTower(nn.Module):
             Block(d_model, config.n_heads, config.dropout)
             for _ in range(config.n_layers)
         )
-        self.ln_f = nn.LayerNorm(d_model)
+        # Normalizes the pooled vector, which is what the pooling modes that average
+        # several tokens need; it is not the encoder stack's final LayerNorm.
+        self.output_norm = nn.LayerNorm(d_model)
         self.pooler = self._pooler(config.pooling, d_model)
         self.apply(_init_weights)
 
@@ -120,7 +122,16 @@ class TextTower(nn.Module):
         x, mask = self.embed(batch)
         for block in self.blocks:
             x = block(x, mask)
-        return self.ln_f(self.pooler(x, mask))
+        return self.output_norm(self.pooler(x, mask))
+
+    def attention_of_cls(self, batch: TextBatch) -> torch.Tensor:
+        """Attention from ``[CLS]``: ``(rows, layers, heads, positions)``."""
+        x, mask = self.embed(batch)
+        collected = []
+        for block in self.blocks:
+            x, weights = block(x, mask, return_weights=True)
+            collected.append(weights[:, :, 0, :])
+        return torch.stack(collected, dim=1) if collected else torch.empty(0)
 
 
 class TabularTower(nn.Module):
@@ -132,15 +143,25 @@ class TabularTower(nn.Module):
         hidden_dim: int = 32,
         output_dim: int = 16,
         dropout: float = 0.1,
+        architecture: str = "mlp",
     ) -> None:
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, output_dim),
-            nn.LayerNorm(output_dim),
-        )
+        if architecture == "linear":
+            modules = [
+                nn.Linear(input_dim, output_dim),
+                nn.LayerNorm(output_dim),
+            ]
+        elif architecture == "mlp":
+            modules = [
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, output_dim),
+                nn.LayerNorm(output_dim),
+            ]
+        else:
+            raise ValueError(f"unknown tabular tower: {architecture}")
+        self.layers = nn.Sequential(*modules)
         self.apply(_init_weights)
 
     def forward(self, x_tab: torch.Tensor) -> torch.Tensor:
@@ -157,14 +178,22 @@ class FusionHead(nn.Module):
         tabular_dim: int,
         hidden_dim: int = 32,
         dropout: float = 0.1,
+        architecture: str = "mlp",
     ) -> None:
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(text_dim + tabular_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
+        input_dim = text_dim + tabular_dim
+        if architecture == "linear":
+            modules = [nn.Linear(input_dim, 1)]
+        elif architecture == "mlp":
+            modules = [
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 1),
+            ]
+        else:
+            raise ValueError(f"unknown fusion head: {architecture}")
+        self.layers = nn.Sequential(*modules)
         self.apply(_init_weights)
 
     def forward(self, h_text: torch.Tensor, h_tab: torch.Tensor) -> torch.Tensor:
