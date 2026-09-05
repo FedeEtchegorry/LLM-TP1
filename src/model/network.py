@@ -24,9 +24,7 @@ import torch.nn as nn
 
 from src.model.attention import Block
 from src.model.encoding import EncodedRows, RowEncoder
-
-INIT_STD = 0.02
-"""The notebook's initialisation, kept."""
+from src.model.towers import INIT_STD, AttentionPooling, _init_weights, sinusoidal
 
 
 PERIODIC_FREQUENCIES = 8
@@ -112,31 +110,6 @@ class NumericEmbedding(nn.Module):
         return out + missing.unsqueeze(-1) * self.missing
 
 
-class AttentionPooling(nn.Module):
-    """A learned query that decides how much each position contributes."""
-
-    def __init__(self, d_model: int) -> None:
-        super().__init__()
-        self.query = nn.Parameter(torch.randn(d_model) * INIT_STD)
-
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        scores = (x @ self.query) * x.shape[-1] ** -0.5
-        scores = scores.masked_fill(~mask, float("-inf"))
-        return (torch.softmax(scores, dim=-1).unsqueeze(-1) * x).sum(dim=1)
-
-
-def sinusoidal(length: int, d_model: int) -> torch.Tensor:
-    """The fixed encoding from *Attention is All you Need*, for axis E."""
-    position = torch.arange(length).unsqueeze(1).float()
-    step = torch.exp(
-        torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
-    )
-    table = torch.zeros(length, d_model)
-    table[:, 0::2] = torch.sin(position * step)
-    table[:, 1::2] = torch.cos(position * step)
-    return table
-
-
 class BtrTransformer(nn.Module):
     """Encoder over one row's heterogeneous sequence, ending in a single logit."""
 
@@ -174,18 +147,7 @@ class BtrTransformer(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(d_model, d_model), nn.ReLU(), nn.Linear(d_model, 1)
         )
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module: nn.Module) -> None:
-        if isinstance(module, nn.Linear):
-            nn.init.normal_(module.weight, mean=0.0, std=INIT_STD)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=INIT_STD)
-            if module.padding_idx is not None:
-                with torch.no_grad():
-                    module.weight[module.padding_idx].zero_()
+        self.apply(_init_weights)
 
     def embed(self, batch: EncodedRows) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the sequence and the mask that says which positions are real."""
