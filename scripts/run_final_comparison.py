@@ -1,11 +1,11 @@
 """La comparación final: el mejor lineal contra el mejor Transformer, en el holdout.
 
     .venv/Scripts/python -m scripts.run_final_comparison \
-        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
+        --parameters parameters-v1.txt --results results/v1-una-torre/eda-contract
 
 **Se corre una sola vez**, sobre dos modelos congelados antes de abrir el conjunto.
 
-``LINEAR_FINALIST`` no puede ser una sección de ``parameters-eda.txt``: la
+``LINEAR_FINALIST`` no puede ser una sección de ``parameters-v1.txt``: la
 representación no es un campo de ``RunConfig`` sino una composición de bloques de
 ``run_embeddings``, así que se reconstruye acá con el mismo protocolo.
 """
@@ -21,7 +21,7 @@ import numpy as np
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, load_parameters
+from src.model.configs import V1_PARAMETERS, PROTOCOL, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_test
@@ -63,7 +63,7 @@ def score_linear(frame, partitions, target) -> tuple[np.ndarray, np.ndarray, flo
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--final-results", type=str, default="")
     parser.add_argument(

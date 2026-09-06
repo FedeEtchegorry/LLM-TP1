@@ -14,7 +14,12 @@ from dataclasses import replace
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, load_parameters
+from src.model.configs import (
+    V1_PARAMETERS,
+    PROTOCOL,
+    apply_overrides,
+    load_parameters,
+)
 from src.model.console import utf8_console
 from src.model.experiment import partition, run_one
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
@@ -24,9 +29,17 @@ from src.model.results import RESULTS_DIR
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", type=str, required=True, help="p. ej. L1, L2")
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="clave=valor",
+        help="cambiar un campo sin declarar una seccion; repetible",
+    )
     return parser.parse_args(argv)
 
 
@@ -37,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     matches = [run for name, run in declared.items() if name.startswith(args.prefix)]
     if len(matches) != 1:
         raise SystemExit(f"[{args.prefix}] identifica {len(matches)} corridas, se necesita una")
-    config = matches[0]
+    config = apply_overrides(matches[0], args.overrides)
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)

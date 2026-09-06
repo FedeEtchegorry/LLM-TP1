@@ -87,6 +87,26 @@ def sinusoidal(length: int, d_model: int) -> torch.Tensor:
     return table
 
 
+class LearnedPositions(nn.Module):
+    def __init__(self, length: int, d_model: int) -> None:
+        super().__init__()
+        self.table = nn.Embedding(length, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.table(torch.arange(x.shape[1], device=x.device))
+
+
+class SinusoidalPositions(nn.Module):
+    """Scaled to ``INIT_STD``: raw, the table outweighs the token it labels 35 to 1."""
+
+    def __init__(self, length: int, d_model: int) -> None:
+        super().__init__()
+        self.register_buffer("table", sinusoidal(length, d_model) * INIT_STD)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.table[: x.shape[1]]
+
+
 class TextTower(nn.Module):
     def __init__(self, vocabulary_size: int, sequence_length: int, config) -> None:
         super().__init__()
@@ -95,14 +115,13 @@ class TextTower(nn.Module):
         self.tokens = nn.Embedding(vocabulary_size, d_model, padding_idx=0)
         self.segments = nn.Embedding(N_TOKEN_TYPES, d_model)
 
-        if config.positional == "learned":
-            self.positions = nn.Embedding(sequence_length, d_model)
-        elif config.positional == "sinusoidal":
-            self.register_buffer("positions", sinusoidal(sequence_length, d_model))
-        elif config.positional == "none":
-            self.positions = None
-        else:
-            raise ValueError(f"unknown positional encoding: {config.positional}")
+        self.positions = self._positions(
+            config.positional, sequence_length, d_model
+        )
+        self.embedding_norm = (
+            nn.LayerNorm(d_model) if config.embedding_norm else nn.Identity()
+        )
+        self.embedding_dropout = nn.Dropout(config.dropout)
 
         self.blocks = nn.ModuleList(
             Block(d_model, config.n_heads, config.dropout)
@@ -110,6 +129,16 @@ class TextTower(nn.Module):
         )
         self.pooler = self._pooler(config.pooling, d_model)
         self.apply(_init_weights)
+
+    @staticmethod
+    def _positions(name: str, length: int, d_model: int) -> nn.Module | None:
+        if name == "learned":
+            return LearnedPositions(length, d_model)
+        if name == "sinusoidal":
+            return SinusoidalPositions(length, d_model)
+        if name == "none":
+            return None
+        raise ValueError(f"unknown positional encoding: {name}")
 
     @staticmethod
     def _pooler(name: str, d_model: int) -> nn.Module:
@@ -124,13 +153,9 @@ class TextTower(nn.Module):
     def embed(self, batch: TextBatch) -> tuple[torch.Tensor, torch.Tensor]:
         mask = batch.attention_mask.bool()
         x = self.tokens(batch.input_ids) + self.segments(batch.token_type_ids)
-
-        if isinstance(self.positions, nn.Embedding):
-            position_ids = torch.arange(x.shape[1], device=x.device)
-            x = x + self.positions(position_ids)
-        elif self.positions is not None:
-            x = x + self.positions[: x.shape[1]]
-        return x, mask
+        if self.positions is not None:
+            x = x + self.positions(x)
+        return self.embedding_dropout(self.embedding_norm(x)), mask
 
     def forward(self, batch: TextBatch) -> torch.Tensor:
         x, mask = self.embed(batch)

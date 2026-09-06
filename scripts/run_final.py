@@ -43,7 +43,7 @@ import pandas as pd
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import (
-    EDA_PARAMETERS,
+    V1_PARAMETERS,
     PROTOCOL,
     TRANSFORMER,
     RunConfig,
@@ -79,7 +79,7 @@ FLAT_RESPONSE = 0.005
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument(
         "--final", "--final-results", dest="final", type=str, default=str(FINAL_DIR)
@@ -107,7 +107,7 @@ def finalists(declared: dict[str, RunConfig]) -> list[RunConfig]:
     that receives the hand-extracted popularity phrase, has the highest recorded
     AP of any run in the family, so a sort by cross-validated AP would promote it
     to the holdout.  A parameter file that declares every finalist gets this list;
-    one that does not -- the historical ``parameters.txt`` -- keeps ``select``.
+    one that does not -- the historical ``parameters-v1-modules.txt`` -- keeps ``select``.
 
     The model comes first because the diagnostics below read ``scores[0]``; the
     linear bar follows it.
@@ -203,7 +203,7 @@ def explainable(
     claim about our design and not about the winner. We prefer whichever Transformer
     already has a holdout record: that is the one a previous run of this script
     actually selected and spent the holdout on, and re-explaining it is free. A sweep
-    point added to ``parameters.txt`` afterwards -- another axis knob, or a seed
+    point added to ``parameters-v1.txt`` afterwards -- another axis knob, or a seed
     repeat under axis S that exists only to measure variance, never to compete for
     selection -- must not silently swap out which model gets explained just because it
     happens to score a hair higher on cross-validation; ``seed_variance`` exists

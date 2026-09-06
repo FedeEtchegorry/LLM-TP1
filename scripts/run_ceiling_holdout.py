@@ -1,7 +1,7 @@
 """El techo diagnóstico (``L0b``) medido sobre el holdout, para enmarcar el resultado.
 
     .venv/Scripts/python -m scripts.run_ceiling_holdout \
-        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
+        --parameters parameters-v1.txt --results results/v1-una-torre/eda-contract
 
 ``L0b`` no compite ni entra a ``eda_contract.FINALISTS``: sólo dibuja la cota superior
 en las figuras del test.
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, load_parameters
+from src.model.configs import V1_PARAMETERS, PROTOCOL, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import FINALISTS, require_valid
 from src.model.experiment import describe, partition, run_test
@@ -27,7 +27,7 @@ CEILING_FILE = "ceiling.json"
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--final-results", type=str, default="")
     parser.add_argument("--force", action="store_true")

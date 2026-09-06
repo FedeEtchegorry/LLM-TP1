@@ -78,9 +78,9 @@ def _ladder_frame(results: str) -> pd.DataFrame:
     la suya queda en ``NaN``: mezclar las dos dispersiones en un mismo eje las vuelve
     incomparables.
     """
-    from src.model.configs import load_parameters
+    from src.model.configs import V1_PARAMETERS, load_parameters
 
-    declared = load_parameters("parameters-eda.txt")
+    declared = load_parameters(V1_PARAMETERS)
     directories = [Path(results)] + ([BRACKET_RESULTS] if BRACKET_RESULTS.exists() else [])
 
     rows = []
@@ -411,7 +411,7 @@ def _bracket_stages(results: str) -> tuple[list[dict], dict]:
     """
     from dataclasses import replace
 
-    from src.model.configs import load_parameters
+    from src.model.configs import V1_PARAMETERS, load_parameters
 
     search_path = Path(results) / "architecture" / "bracket-search.json"
     if not search_path.exists():
@@ -419,7 +419,7 @@ def _bracket_stages(results: str) -> tuple[list[dict], dict]:
     search = json.loads(search_path.read_text(encoding="utf-8"))
     spreads = _seed_index(results)
 
-    declared = load_parameters("parameters-eda.txt")
+    declared = load_parameters(V1_PARAMETERS)
     current = next(run for name, run in declared.items() if name.startswith("L2"))
 
     def tipado(axis: str, value: str):

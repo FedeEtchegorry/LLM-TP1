@@ -1,7 +1,7 @@
 """Whether the directed path's own order decided where it stopped.
 
     .venv/Scripts/python -m scripts.run_greedy_validation \
-        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
+        --parameters parameters-v1.txt --results results/v1-una-torre/eda-contract
 
 Task 5 walks depth, then width, then heads, resolving each axis against the winner
 of the previous one.  That visits seven of twenty-seven capacity points and admits
@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import EDA_PARAMETERS, RunConfig, ladder_runs, load_parameters
+from src.model.configs import V1_PARAMETERS, RunConfig, ladder_runs, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one
@@ -184,7 +184,7 @@ def _layer(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--output", type=str, default="")
     parser.add_argument("--force", action="store_true")

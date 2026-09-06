@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, RunConfig, load_parameters
+from src.model.configs import V1_PARAMETERS, PROTOCOL, RunConfig, load_parameters
 from src.model.console import utf8_console
 from src.model.experiment import describe, partition
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
@@ -46,7 +46,7 @@ def chosen(results: str | Path) -> RunConfig:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)

@@ -7,7 +7,13 @@ import time
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, RunConfig, load_parameters
+from src.model.configs import (
+    V1_PARAMETERS,
+    PROTOCOL,
+    RunConfig,
+    apply_overrides,
+    load_parameters,
+)
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, sweep_note
@@ -27,11 +33,19 @@ def selected_runs(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--prefix", type=str, required=True)
     parser.add_argument(
         "--force", action="store_true", help="retrain even when a result is recorded"
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="clave=valor",
+        help="cambiar un campo sin declarar una seccion; repetible",
     )
     return parser.parse_args(argv)
 
@@ -41,7 +55,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
     require_valid(declared)
-    runs = selected_runs(declared, args.prefix)
+    runs = {
+        run.name: run
+        for run in (
+            apply_overrides(config, args.overrides)
+            for config in selected_runs(declared, args.prefix).values()
+        )
+    }
 
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)

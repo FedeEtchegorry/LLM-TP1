@@ -182,46 +182,6 @@ class TabBatch:
         return TabBatch(x_tab=self.x_tab[rows])
 
 
-@dataclass(frozen=True)
-class EncodedRows:
-    """The tensors the network consumes, already padded to a common width."""
-
-    token_ids: torch.Tensor
-    field_ids: torch.Tensor
-    padding_mask: torch.Tensor
-    numeric_values: torch.Tensor
-    numeric_buckets: torch.Tensor
-    numeric_missing: torch.Tensor
-    numeric_ratios: torch.Tensor
-
-    def __len__(self) -> int:
-        return int(self.token_ids.shape[0])
-
-    def to(self, device) -> "EncodedRows":
-        """The same rows on another device. Cheap and idempotent when already there."""
-        return EncodedRows(
-            token_ids=self.token_ids.to(device),
-            field_ids=self.field_ids.to(device),
-            padding_mask=self.padding_mask.to(device),
-            numeric_values=self.numeric_values.to(device),
-            numeric_buckets=self.numeric_buckets.to(device),
-            numeric_missing=self.numeric_missing.to(device),
-            numeric_ratios=self.numeric_ratios.to(device),
-        )
-
-    def select(self, rows: torch.Tensor) -> "EncodedRows":
-        """The same columns for a subset of rows, in the order given: one batch."""
-        return EncodedRows(
-            token_ids=self.token_ids[rows],
-            field_ids=self.field_ids[rows],
-            padding_mask=self.padding_mask[rows],
-            numeric_values=self.numeric_values[rows],
-            numeric_buckets=self.numeric_buckets[rows],
-            numeric_missing=self.numeric_missing[rows],
-            numeric_ratios=self.numeric_ratios[rows],
-        )
-
-
 @dataclass
 class RowEncoder:
     """Fits its vocabulary and statistics on training rows, then encodes any rows."""
@@ -231,7 +191,6 @@ class RowEncoder:
     _centres: dict[str, float] = field(default_factory=dict, init=False)
     _scales: dict[str, float] = field(default_factory=dict, init=False)
     _edges: dict[str, np.ndarray] = field(default_factory=dict, init=False)
-    _bounds: dict[str, np.ndarray] = field(default_factory=dict, init=False)
     _tabular_price_centre: float = field(default=0.0, init=False)
     _tabular_price_bounds: np.ndarray = field(
         default_factory=lambda: np.empty(0), init=False
@@ -278,10 +237,6 @@ class RowEncoder:
         """Fixed width: ``[CLS]``, the shared budget, and one ``[SEP]`` per field."""
         return 1 + self.spec.max_text_tokens + len(self.spec.text_fields)
 
-    @property
-    def n_numeric(self) -> int:
-        return len(self.spec.numeric_fields)
-
     def layout(self, rows: pd.DataFrame) -> list[tuple[FieldSpan, ...]]:
         """Where every field lands in every row, once the budget has been shared out."""
         return [
@@ -308,7 +263,7 @@ class RowEncoder:
         ).fit(texts)
 
     def _fit_numbers(self, training: pd.DataFrame) -> None:
-        self._centres, self._scales, self._edges, self._bounds = {}, {}, {}, {}
+        self._centres, self._scales, self._edges = {}, {}, {}
         for name in self.spec.numeric_fields:
             values = numeric_column(training, name)
             present = values[~np.isnan(values)]
@@ -319,7 +274,6 @@ class RowEncoder:
             filled = np.where(np.isnan(values), centre, values)
             quantiles = np.linspace(0.0, 1.0, self.spec.n_buckets + 1)
             self._edges[name] = np.unique(np.quantile(filled, quantiles[1:-1]))
-            self._bounds[name] = self._interval_bounds(filled, quantiles)
 
     def _interval_bounds(self, filled: np.ndarray, quantiles: np.ndarray) -> np.ndarray:
         cuts = np.quantile(filled, quantiles)
@@ -409,35 +363,9 @@ class RowEncoder:
 
         return TabBatch(x_tab=torch.from_numpy(x_tab))
 
-    def _numeric(
-        self, rows: pd.DataFrame
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Standardised value, bucket index and the flag, one column per field."""
-        n_rows, n_fields = len(rows), self.n_numeric
-        n_buckets = self.spec.n_buckets
-        values = np.zeros((n_rows, n_fields), dtype=np.float32)
-        buckets = np.zeros((n_rows, n_fields), dtype=np.int64)
-        missing = np.zeros((n_rows, n_fields), dtype=np.float32)
-        ratios = np.zeros((n_rows, n_fields, n_buckets), dtype=np.float32)
-
-        for column, name in enumerate(self.spec.numeric_fields):
-            raw = numeric_column(rows, name)
-            absent = np.isnan(raw)
-            filled = np.where(absent, self._centres[name], raw)
-            values[:, column] = (filled - self._centres[name]) / self._scales[name]
-            buckets[:, column] = np.digitize(filled, self._edges[name])
-            missing[:, column] = absent.astype(np.float32)
-            ratios[:, column, :] = self.piecewise_ratios(name, filled)
-
-        return values, buckets, missing, ratios
-
     def tabular_price_ratios(self, values: np.ndarray) -> np.ndarray:
         """``(len(values), PRICE_PIECES)``: the price block ``x_tab`` would carry."""
         return self._ratios_for_bounds(self._tabular_price_bounds, values)
-
-    def piecewise_ratios(self, name: str, values: np.ndarray) -> np.ndarray:
-        """``(rows, n_buckets)``: how far the value travelled through each bucket."""
-        return self._ratios_for_bounds(self._bounds[name], values)
 
     @staticmethod
     def _ratios_for_bounds(bounds: np.ndarray, values: np.ndarray) -> np.ndarray:

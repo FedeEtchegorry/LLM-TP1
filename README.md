@@ -35,14 +35,14 @@ columna (`src/eda/noise.py`).
 
 ## Modelo
 
-Las corridas se declaran en `parameters-eda.txt`, no en el código: `[DEFAULT]` tiene la
-arquitectura base y cada sección dice sólo lo que cambia.
+Las corridas se declaran en `parameters.txt`, no en el código: `[DEFAULT]` tiene la
+arquitectura base de dos torres y `[RUN]` es la sección que se edita para correr algo.
+Lo que no está declarado se pasa por `--set clave=valor`, que no toca el archivo.
 
-> Hay dos archivos de parámetros y **no comparten ninguna sección**:
-> `parameters-eda.txt` (53 secciones, el contrato del EDA) y `parameters.txt`
-> (43 secciones, el barrido por ejes). El default es `parameters-eda.txt`, salvo en
-> `run_transfer` y `run_modules`, que parten de secciones que sólo están en
-> `parameters.txt`.
+> Hay dos archivos congelados que reproducen la entrega 1 de una sola torre y **no se
+> editan**: `parameters-v1.txt` (antes `parameters-eda.txt`, el contrato del EDA) y
+> `parameters-v1-modules.txt` (antes `parameters.txt`, el barrido por ejes, con otro
+> contrato de entrada). Los runners de v1 apuntan solos a ellos.
 
 Cada configuración se mide con tres semillas (1337, 7, 99) y decide la media de las
 tres.
@@ -84,7 +84,7 @@ escriben `final/comparison.json` y `final/ceiling.json`.
 ### Transfer learning
 
 ```bash
-.venv/bin/python -m scripts.run_transfer --parameters parameters.txt
+.venv/bin/python -m scripts.run_transfer --parameters parameters-v1-modules.txt
 ```
 
 ### Figuras
@@ -101,9 +101,10 @@ Ninguna entrena: leen los JSON y las predicciones guardadas.
 ### Opciones comunes
 
 ```bash
---parameters otro.txt    # otro archivo de config (default: parameters-eda.txt)
+--parameters otro.txt    # otro archivo de config
 --results otra/carpeta   # escribir en otro lado
 --force                  # reentrenar aunque ya haya resultado guardado
+--set clave=valor        # cambiar un campo sin declarar una sección; repetible
 ```
 
 ## Resultados

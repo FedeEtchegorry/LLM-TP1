@@ -21,7 +21,7 @@ import numpy as np
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
 from src.model.configs import (
-    EDA_PARAMETERS,
+    V1_PARAMETERS,
     PROTOCOL,
     TRAINING,
     RunConfig,
@@ -87,7 +87,7 @@ INTERPRETABILITY_FIGURES = (
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--figures", type=str, default=str(fig.FIGURES_DIR))
     parser.add_argument("--only", type=str, default="", help="draw just the matching figure(s)")
@@ -353,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     if wanted("07-tasa-aprendizaje", args.only):
         undeclared = [name for name in LEARNING_RATE_SWEEP_NAMES if name not in declared]
         if undeclared:
-            report_missing("07-tasa-aprendizaje", [f"no declaradas en parameters.txt: {undeclared}"])
+            report_missing("07-tasa-aprendizaje", [f"no declaradas en el archivo de parametros: {undeclared}"])
         else:
             folds = fold_frame(results_dir)
             recorded_names = set(folds["name"]) if not folds.empty else set()
@@ -377,7 +377,7 @@ def main(argv: list[str] | None = None) -> int:
         wanted_names = set(SEED_VARIANCE_SEED_RUNS) | set(SEED_VARIANCE_CONFIG_RUNS)
         undeclared = sorted(name for name in wanted_names if name not in declared)
         if undeclared:
-            report_missing("07-varianza-semilla", [f"no declaradas en parameters.txt: {undeclared}"])
+            report_missing("07-varianza-semilla", [f"no declaradas en el archivo de parametros: {undeclared}"])
         else:
             seed_summary = summary_frame(results_dir)
             recorded_names = set(seed_summary["name"]) if not seed_summary.empty else set()
@@ -399,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
     if wanted("07-atencion-l2-texto", args.only):
         if TEXT_ATTENTION_CONFIG not in declared:
             report_missing(
-                "07-atencion-l2-texto", [f"no declarada en parameters.txt: {TEXT_ATTENTION_CONFIG!r}"]
+                "07-atencion-l2-texto", [f"no declarada en el archivo de parametros: {TEXT_ATTENTION_CONFIG!r}"]
             )
         else:
             text_config = declared[TEXT_ATTENTION_CONFIG]

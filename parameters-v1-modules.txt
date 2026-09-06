@@ -1,0 +1,308 @@
+# CONGELADO. El barrido por ejes de la entrega 1; antes se llamaba parameters.txt.
+# Lo leen run_modules y run_transfer, y su contrato de entrada no es el del EDA.
+# No se edita. La arquitectura de dos torres se declara en parameters.txt.
+#
+# Los resultados guardados de la entrega 1 ya no resuelven por digest: RunConfig gano
+# seis campos desde entonces y ninguna de estas secciones alcanza su record. Las cifras
+# de v1 se citan de los JSON y los PNG ya generados, no se regeneran.
+
+[DEFAULT]
+model              = transformer
+
+# what enters the sequence
+text_fields        = title, description, ingredients
+categorical_fields = category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+
+# the architecture
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+tokenizer          = whole-word
+keep_brackets      = false
+tab_tower          = mlp
+fusion_head         = mlp
+tabular_dim         = 16
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+seed               = 1337
+
+
+# ==============================================================================
+# The ladder. Each rung is one run that is both a slide and an ablation point,
+# so no configuration is ever trained twice.
+#   L1 -> L2  is axis B (does attention buy anything over an average?)
+#   L2 -> L3  is axis G (do the tabular columns add to the text?)
+#   L3 -> L4  is axis A (is the bucket term worth the +0.137 AP the EDA predicts?)
+# ==============================================================================
+
+[L0 linear bar]
+# Not the Transformer: the logistic regression docs/EDA.md quotes at AP 0.813.
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+
+[L1 bag of embeddings]
+# Text only, no attention at all. With no layers the [CLS] position is never
+# updated, so this rung has to pool by mean -- which is the dilution it measures.
+n_layers           = 0
+pooling            = mean
+categorical_fields =
+numeric_fields     =
+
+[L2 text with attention]
+categorical_fields =
+numeric_fields     =
+
+[L3 tabular, numbers affine only]
+numeric_embedding  = affine
+
+[L4 tabular, numbers affine and bucketed]
+# The base configuration; every sweep below changes exactly one thing from here.
+
+
+# ==============================================================================
+# Module alternatives, one run per point, all measured against L4.
+# ==============================================================================
+
+# --- axis A: how a number becomes a vector -------------------------------------
+# L3 and L4 already carry affine and affine+buckets; these four complete the axis.
+# piecewise costs the same table as buckets, so the pair isolates the ordering.
+[A no numeric reading]
+numeric_embedding  = none
+
+[A buckets only]
+numeric_embedding  = buckets
+
+[A piecewise-linear]
+numeric_embedding  = piecewise
+
+[A periodic]
+numeric_embedding  = periodic
+
+# --- axis B: depth -------------------------------------------------------------
+[B 1 layer]
+n_layers           = 1
+
+[B 4 layers]
+n_layers           = 4
+
+# --- axis C: heads, at a fixed width -------------------------------------------
+[C 1 head]
+n_heads            = 1
+
+[C 2 heads]
+n_heads            = 2
+
+[C 8 heads]
+n_heads            = 8
+
+# --- axis D: width -------------------------------------------------------------
+[D d_model 32]
+d_model            = 32
+
+[D d_model 128]
+d_model            = 128
+
+# --- axis E: positional encoding -----------------------------------------------
+# The text is a template, so we expect this axis to be flat. A predicted null
+# result that comes out null is still a result.
+[E no positional]
+positional         = none
+
+[E sinusoidal]
+positional         = sinusoidal
+
+# --- axis F: pooling -----------------------------------------------------------
+[F mean pooling]
+pooling            = mean
+
+[F attention pooling]
+pooling            = attention
+
+# --- axis G: which fields ------------------------------------------------------
+# title and description each reach AP 0.672 alone under a linear bag of words,
+# so we expect these three to tie. If they do not, something is overfitting.
+[G title only]
+text_fields        = title
+
+[G description only]
+text_fields        = description
+
+[G title and description]
+text_fields        = title, description
+
+[G tabular only]
+text_fields        =
+
+# --- axis H: regularisation ----------------------------------------------------
+# The train/validation curves come free from every run above; these two move the
+# knob that the curves say matters.
+[H no dropout]
+dropout            = 0.0
+
+[H dropout 0.3]
+dropout            = 0.3
+
+# --- axis X: the feature asymmetry against the linear bar ----------------------
+# L0 gets popularity_phrase as its own one-hot column; L4 only sees it buried in
+# the title's subwords. This closes that gap and measures how much of it was that.
+[X popularity phrase]
+categorical_fields = category, storage_type, allergens, unit_of_measure, popularity_phrase
+
+# --- axis K: learning rate sobre la mejor configuración --------------------------
+# Todos los puntos parten de V d_model 32, 1 capa (AP 0.795), que es la base
+# elegida tras los ejes G y V. El punto 1e-4 ya está medido ahí, así que no se
+# repite. best_epoch en 27-28 sugiere que el modelo no agota el presupuesto de
+# épocas: si un LR más alto llega antes al mismo lugar, se verá en ese número.
+
+[K lr 3e-5]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+learning_rate      = 3e-5
+
+[K lr 3e-4]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+learning_rate      = 3e-4
+
+[K lr 1e-3]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+learning_rate      = 1e-3
+
+[K lr 3e-3]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+learning_rate      = 3e-3
+
+# --- axis Y: joint capacity, not a single knob ----------------------------------
+# The model is 140k parameters over ~830 positives per fold. Each point here
+# changes width and depth together, on purpose: it is one hypothesis (the model
+# is oversized), not two separate sweeps that would each measure something else.
+[Y d_model 16, 1 capa]
+d_model            = 16
+n_layers           = 1
+
+[Y d_model 32, 1 capa]
+d_model            = 32
+n_layers           = 1
+
+# [Y d_model 32, 2 capas] removed: with n_layers=2 inherited from [DEFAULT], it
+# declared the exact same configuration as [D d_model 32] under a second name.
+# See test_no_two_runs_share_a_digest.
+
+# --- axis Z: heavier regularisation ---------------------------------------------
+# Axis H already tried 0.0 and 0.3; the gap at the best epoch (0.06-0.13 on the
+# L4 folds) is real enough to also try further out.
+[Z dropout 0.5]
+dropout            = 0.5
+
+
+[G tabular con popularity]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+
+[V sin dropout]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+dropout            = 0.0
+
+[V d_model 32, 1 capa]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+
+[V d_model 32, 1 capa, sin dropout]
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+d_model            = 32
+n_layers           = 1
+dropout            = 0.0
+
+# ==============================================================================
+# Axis S: same fold split, different initialisation. Training.seed used to be one
+# constant shared by every run; now it is a field of RunConfig, so these four
+# points repeat the winner and the bar under two more seeds, changing nothing
+# else. Written out in full rather than inherited from [DEFAULT], so a later
+# edit to [DEFAULT] cannot silently change what these repeats are repeating.
+# ==============================================================================
+
+[S ganadora seed 7]
+model              = transformer
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+d_model            = 32
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 3e-4
+seed               = 7
+
+[S ganadora seed 99]
+model              = transformer
+text_fields        =
+categorical_fields = popularity_phrase, category, storage_type, allergens, unit_of_measure
+numeric_fields     = price, price_position, net_weight_oz, nutrition_score
+d_model            = 32
+n_layers           = 1
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 3e-4
+seed               = 99
+
+# L0 is a logistic regression: today nothing in its scorer reads ``seed`` at all
+# (``logistic_scorer`` takes no seed argument, and ``LogisticRegression`` here is
+# built without ``random_state``). These two will get distinct digests and
+# distinct records, but very likely identical scores to plain L0 -- that gap is
+# itself worth having on record before reading the S table.
+[S L0 seed 7]
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+seed               = 7
+
+[S L0 seed 99]
+model              = logistic
+text_fields        =
+categorical_fields = popularity_phrase, category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 2
+n_heads            = 4
+dropout            = 0.1
+positional         = learned
+pooling            = cls
+numeric_embedding  = affine+buckets
+learning_rate      = 1e-4
+seed               = 99
+

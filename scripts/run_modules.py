@@ -16,9 +16,10 @@ from dataclasses import asdict
 
 from src.eda.loading import load_dataset
 from src.model.configs import (
-    PARAMETERS_PATH,
+    V1_MODULES,
     PROTOCOL,
     RunConfig,
+    apply_overrides,
     axis_runs,
     ladder_runs,
     load_parameters,
@@ -55,7 +56,7 @@ def axis_points(
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(V1_MODULES))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument(
         "--base",
@@ -66,6 +67,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--axis", type=str, default="", help="run one axis only, by its letter"
+    )
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="clave=valor",
+        help="cambiar un campo sin declarar una seccion; repetible",
     )
     return parser.parse_args(argv)
 
@@ -94,7 +103,10 @@ def comparison_table(base: EvaluationResult, results: list[EvaluationResult]) ->
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
-    declared = load_parameters(args.parameters)
+    declared = {
+        name: apply_overrides(run, args.overrides)
+        for name, run in load_parameters(args.parameters).items()
+    }
     matches = [
         run for name, run in ladder_runs(declared).items()
         if name.startswith(args.base)

@@ -34,7 +34,8 @@ from src.model.baseline import target_of
 from src.model.configs import (
     FINETUNE,
     FROZEN,
-    PARAMETERS_PATH,
+    V1_MODULES,
+    V1_PARAMETERS,
     PROTOCOL,
     TRANSFER,
     RunConfig,
@@ -62,7 +63,7 @@ REGIME_LABELS = {
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(PARAMETERS_PATH))
+    parser.add_argument("--parameters", type=str, default=str(V1_MODULES))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--figures", type=str, default=str(FIGURES_DIR))
     parser.add_argument("--force", action="store_true")
@@ -175,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
     declared = load_parameters(args.parameters)
-    if Path(args.parameters).name == "parameters-eda.txt":
+    if Path(args.parameters).name == V1_PARAMETERS.name:
         require_valid(declared)
     runs = transfer_runs(declared)
     if args.only:

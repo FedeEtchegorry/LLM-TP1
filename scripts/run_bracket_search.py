@@ -1,7 +1,7 @@
 """Búsqueda por bracket adaptativo: tres variantes por eje, y se extiende si gana un borde.
 
     .venv/Scripts/python -m scripts.run_bracket_search \
-        --parameters parameters-eda.txt --results results/v1-una-torre/eda-contract
+        --parameters parameters-v1.txt --results results/v1-una-torre/eda-contract
 
 Gana la media más alta sobre tres semillas, sin margen ni desempate por dispersión.
 Los topes de cada eje están en ``LADDERS``.
@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from src.eda.loading import load_dataset
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, RunConfig, load_parameters
+from src.model.configs import V1_PARAMETERS, PROTOCOL, RunConfig, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one
@@ -214,7 +214,7 @@ def search_set(name: str, field: str, options, base: RunConfig, evaluate) -> tup
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)

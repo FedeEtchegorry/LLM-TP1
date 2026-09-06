@@ -65,7 +65,11 @@ def find_prefix(declared: dict[str, RunConfig], prefix: str) -> RunConfig:
 
 
 def validation_errors(declared: dict[str, RunConfig]) -> list[str]:
-    """Return every contract violation instead of stopping at the first one."""
+    """Return every contract violation instead of stopping at the first one.
+
+    The field contract holds for every section. The rung checks hold only where the
+    ladder is declared, so a file that does not carry it is not thereby invalid.
+    """
     errors: list[str] = []
     for name, run in declared.items():
         fields = configured_fields(run)
@@ -89,6 +93,8 @@ def validation_errors(declared: dict[str, RunConfig]) -> list[str]:
             )
 
     for prefix in ("L0 linear raw EDA", "L2"):
+        if not any(name.startswith(prefix) for name in declared):
+            continue
         try:
             run = find_prefix(declared, prefix)
         except ValueError as error:
@@ -102,6 +108,8 @@ def validation_errors(declared: dict[str, RunConfig]) -> list[str]:
 
     rungs = ladder_runs(declared)
     for left_prefix, right_prefix, expected in EXPECTED_LADDER_MOVES:
+        if not any(name.startswith(left_prefix) for name in rungs):
+            continue
         try:
             left = find_prefix(rungs, left_prefix)
             right = find_prefix(rungs, right_prefix)

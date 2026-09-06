@@ -1,6 +1,6 @@
-"""What varies between runs lives in ``parameters.txt``; what does not lives here.
+"""What varies between runs lives in the parameters file; what does not lives here.
 
-``parameters.txt`` carries only the knobs an experiment actually turns -- the fields
+The file carries only the knobs an experiment actually turns -- the fields
 that enter, the shape of the encoder, and how numbers are embedded. Everything else is
 a constant below.
 
@@ -14,12 +14,16 @@ from __future__ import annotations
 import hashlib
 import re
 from configparser import ConfigParser
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import ClassVar
 
 PARAMETERS_PATH = Path("parameters.txt")
-EDA_PARAMETERS = Path("parameters-eda.txt")
+"""The two-tower architecture. The only file that is still written to."""
+
+V1_PARAMETERS = Path("parameters-v1.txt")
+V1_MODULES = Path("parameters-v1-modules.txt")
+"""Frozen: what the first submission declared, under the two names it used."""
 
 LOGISTIC = "logistic"
 TRANSFORMER = "transformer"
@@ -59,7 +63,7 @@ TRANSFER_NAME = re.compile(r"^T ")
 
 
 class ParameterError(ValueError):
-    """A malformed ``parameters.txt``, reported with the section that caused it."""
+    """A malformed parameters file, reported with the section that caused it."""
 
 
 @dataclass(frozen=True)
@@ -128,10 +132,11 @@ class RunConfig:
     n_layers: int
     n_heads: int
     dropout: float
-    positional: str
     pooling: str
     numeric_embedding: str
 
+    positional: str = "learned"
+    embedding_norm: bool = True
     tokenizer: str = "wordpiece"
     keep_brackets: bool = True
     tab_tower: str = "mlp"
@@ -247,6 +252,52 @@ def transfer_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
     return {name: run for name, run in runs.items() if TRANSFER_NAME.match(name)}
 
 
+def apply_overrides(config: RunConfig, assignments: list[str]) -> RunConfig:
+    """Build a variant from ``key=value`` strings, so probing costs no declared section.
+
+    The overrides land in the run's name, which is what the results record shows. They
+    reach the digest only through the fields they change, so the same values spelled in
+    a different order stay one cache entry.
+    """
+    if not assignments:
+        return config
+    annotations = {
+        field.name: field.type for field in fields(RunConfig) if field.name != "name"
+    }
+    changes: dict[str, object] = {}
+    for assignment in assignments:
+        key, separator, value = assignment.partition("=")
+        key, value = key.strip(), value.strip()
+        if not separator or key not in annotations:
+            raise ParameterError(
+                f"--set {assignment!r} does not name a field of a run; expected one of "
+                f"{sorted(annotations)}"
+            )
+        changes[key] = _coerced(key, annotations[key], value)
+    label = ", ".join(f"{key}={changes[key]}" for key in sorted(changes))
+    changed = replace(config, name=f"{config.name} [{label}]", **changes)
+    _validate(changed)
+    return changed
+
+
+def _coerced(key: str, annotation: str, value: str):
+    """Read one override the way ``ConfigParser`` would have read the same line."""
+    try:
+        if annotation.startswith("tuple"):
+            return _tuple(value)
+        if annotation == "bool":
+            return ConfigParser.BOOLEAN_STATES[value.lower()]
+        if annotation == "int":
+            return int(value)
+        if annotation == "float":
+            return float(value)
+        return value
+    except (KeyError, ValueError) as error:
+        raise ParameterError(
+            f"--set {key}={value!r} is not a valid {annotation}"
+        ) from error
+
+
 def _run(name: str, section) -> RunConfig:
     known = {field.name for field in fields(RunConfig)} - {"name"}
     unknown = set(section.keys()) - known
@@ -267,9 +318,10 @@ def _run(name: str, section) -> RunConfig:
             n_layers=section.getint("n_layers"),
             n_heads=section.getint("n_heads"),
             dropout=section.getfloat("dropout"),
-            positional=section.get("positional"),
             pooling=section.get("pooling"),
             numeric_embedding=section.get("numeric_embedding"),
+            positional=section.get("positional", fallback="learned"),
+            embedding_norm=section.getboolean("embedding_norm", fallback=True),
             tokenizer=section.get("tokenizer", fallback="wordpiece"),
             keep_brackets=section.getboolean("keep_brackets", fallback=True),
             tab_tower=section.get("tab_tower", fallback="mlp"),

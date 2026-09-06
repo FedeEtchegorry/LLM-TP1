@@ -2,7 +2,7 @@
 
     .venv/bin/python -m scripts.run_ladder
 
-Every rung is declared in ``parameters.txt`` and is one run that doubles as a slide and
+Every rung is declared in ``parameters-v1.txt`` and is one run that doubles as a slide and
 as a point in the ablation table:
 
     L1 -> L2   axis B, does attention buy anything over an average?
@@ -22,7 +22,7 @@ import numpy as np
 
 from src.eda.loading import load_dataset
 from src.model.baseline import target_of
-from src.model.configs import EDA_PARAMETERS, PROTOCOL, ladder_runs, load_parameters
+from src.model.configs import V1_PARAMETERS, PROTOCOL, ladder_runs, load_parameters
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, sweep_note
@@ -226,7 +226,7 @@ def print_reading(scores: Mapping[str, Sequence[float]]) -> dict:
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--parameters", type=str, default=str(EDA_PARAMETERS))
+    parser.add_argument("--parameters", type=str, default=str(V1_PARAMETERS))
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument(
         "--force", action="store_true", help="retrain even when a result is recorded"

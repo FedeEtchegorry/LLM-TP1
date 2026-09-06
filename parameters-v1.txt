@@ -1,3 +1,11 @@
+# CONGELADO. Reproduce la entrega 1 de una sola torre; antes se llamaba
+# parameters-eda.txt, y con ese nombre lo citan docs/informe-ejercicio-2.md y docs/EDA.md.
+# No se edita. La arquitectura de dos torres se declara en parameters.txt.
+#
+# Los resultados guardados de la entrega 1 ya no resuelven por digest: RunConfig gano
+# seis campos desde entonces y ninguna de estas secciones alcanza su record. Las cifras
+# de v1 se citan de los JSON y los PNG ya generados, no se regeneran.
+
 # Declared runs for Exercise 2, under the input contract Exercise 1 hands over.
 #
 # Only what the plan declares by hand lives here. The architecture search of
@@ -27,8 +35,8 @@ n_heads            = 4
 dropout            = 0.1
 positional         = none
 pooling            = mean
-tokenizer          = wordpiece
-keep_brackets      = true
+tokenizer          = whole-word
+keep_brackets      = false
 tab_tower          = mlp
 fusion_head         = mlp
 tabular_dim         = 16

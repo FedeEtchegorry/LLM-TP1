@@ -24,7 +24,7 @@ import sys
 import time
 from dataclasses import dataclass
 
-PARAMETERS = "parameters-eda.txt"
+PARAMETERS = "parameters-v1.txt"
 RESULTS = "results/v1-una-torre/eda-contract"
 FINAL_RESULTS = f"{RESULTS}/final"
 AUDIT_OUTPUT = f"{RESULTS}/audit.md"
