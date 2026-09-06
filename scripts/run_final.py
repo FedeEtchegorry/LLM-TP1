@@ -53,7 +53,6 @@ from src.model.console import utf8_console
 from src.model.eda_contract import FINALISTS
 from src.model.diagnostics import (
     Scored,
-    bucket_embedding_axis,
     calibration,
     calibration_error,
     cls_attention,
@@ -62,6 +61,7 @@ from src.model.diagnostics import (
     pr_points,
     ranking_gains,
     roc_points,
+    tower_norms,
 )
 from src.model.experiment import FINAL_DIR, describe, partition, run_test
 from src.model.figures import FIGURES_DIR
@@ -338,6 +338,12 @@ def interpretability(
         )
         print(f"figure: {path}")
 
+    print("\n=== HOW LOUDLY DOES EACH TOWER SPEAK? ===")
+    norms = tower_norms(model, encoder, frame, explained.read_on)
+    print(norms.to_string(index=False, float_format="{:.3f}".format))
+    ratio = float(norms.set_index("tower").loc["h_text", "mean"]) / max(
+        float(norms.set_index("tower").loc["h_tab", "mean"]), 1e-9
+    )
     if PRICE_COLUMN not in config.numeric_fields:
         print(f"\n  {config.name} never reads {PRICE_COLUMN}: no U to recover")
         return
@@ -346,7 +352,6 @@ def interpretability(
     sweep = price_bucket_recovery(
         model, encoder, frame, explained.read_on, column=PRICE_COLUMN
     )
-    axis = bucket_embedding_axis(model, encoder, PRICE_COLUMN)
     display = sweep.assign(
         observed=lambda d: (d["observed"] * 100).map("{:.1f}%".format),
         counterfactual=lambda d: (d["counterfactual"] * 100).map("{:.1f}%".format),
@@ -379,7 +384,6 @@ def interpretability(
 
     path = price_recovery(
         sweep,
-        axis,
         title=f"El modelo frente a la U invertida de price_position ({label})",
         path=figures / "09-final-buckets-precio.png",
     )

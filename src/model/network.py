@@ -35,18 +35,14 @@ class BtrTransformer(nn.Module):
         )
 
     def forward(self, batch: TowerBatch) -> torch.Tensor:
-        """Return one raw purchase logit per encoded row."""
         text_batch, tabular_batch = batch
         h_text = self.text_tower(text_batch)
         h_tab = self.tabular_tower(tabular_batch.x_tab)
         return self.fusion_head(h_text, h_tab)
 
     def attention_of_cls(self, batch: TowerBatch) -> torch.Tensor:
-        """What ``[CLS]`` attends to, for the interpretability slide.
-
-        Only the text tower has a sequence to attend over, so the tabular half of the
-        batch is not read.
-        """
+        """Only the text tower has a sequence to attend over; the tabular half of the
+        batch is not read."""
         text_batch, _ = batch
         return self.text_tower.attention_of_cls(text_batch)
 

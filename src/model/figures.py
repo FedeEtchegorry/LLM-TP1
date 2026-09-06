@@ -1,8 +1,6 @@
 """The model side's charts, kept apart from the numbers that produce them.
 
-Same division as ``src/eda/plots.py``, and the same conventions: the Agg backend so a
-run needs no display, one file per figure under ``figures/``, and Spanish labels
-because these end up on the slides while the code and the docs stay in English.
+One file per figure under ``figures/``, and Spanish labels while the code and the docs stay in English.
 """
 
 from __future__ import annotations
@@ -30,13 +28,8 @@ FIGSIZE = (10, 6)
 WIDE = (12, 5)
 
 T95_DF4 = 2.776
-"""Two-sided 95% critical value of Student's t at 4 degrees of freedom: this protocol
-always produces 5 paired folds, too few to lean on the normal approximation instead."""
-
 
 def _framed(axes) -> None:
-    """Draw all four spines -- the global style hides top/right by default, but a
-    handful of charts (the Ejercicio 2 decision figures) are meant to look boxed."""
     for spine in axes.spines.values():
         spine.set_visible(True)
         spine.set_color("#52514e")
@@ -333,31 +326,20 @@ def attention_by_group(table: pd.DataFrame, *, title: str, path: Path) -> Path:
     return _save(figure, path)
 
 
-def price_recovery(
-    sweep: pd.DataFrame, axis: pd.DataFrame, *, title: str, path: Path
-) -> Path:
-    """The observed hump against the model's own price response, and the bucket axis."""
-    figure, (left, right) = plt.subplots(1, 2, figsize=WIDE)
+def price_recovery(sweep: pd.DataFrame, *, title: str, path: Path) -> Path:
+    """The observed hump against the model's own price response."""
+    figure, axes = plt.subplots(figsize=(7.5, 5))
 
-    left.plot(sweep["bucket"] + 1, sweep["observed"] * 100, "o-",
+    axes.plot(sweep["bucket"] + 1, sweep["observed"] * 100, "o-",
               color=OBSERVED_COLOR, linewidth=2, label="BTR observado")
-    left.plot(sweep["bucket"] + 1, sweep["counterfactual"] * 100, "s--",
+    axes.plot(sweep["bucket"] + 1, sweep["counterfactual"] * 100, "s--",
               color=MODEL_COLOR, linewidth=2, label="respuesta del modelo (contrafactico)")
-    left.set_xlabel("Decil de price_position")
-    left.set_ylabel("% comprado")
-    left.set_title("La U invertida, observada y aprendida")
-    left.grid(alpha=0.25)
-    left.legend(loc="best", fontsize=8)
+    axes.set_xlabel("Decil de price_position")
+    axes.set_ylabel("% comprado")
+    axes.set_title(title)
+    axes.grid(alpha=0.25)
+    axes.legend(loc="best", fontsize=8)
 
-    right.plot(axis["bucket"] + 1, axis["component"], "o-",
-               color=HIGHLIGHT, linewidth=2)
-    right.axhline(0.0, color=NEUTRAL, linewidth=1)
-    right.set_xlabel("Decil de price_position")
-    right.set_ylabel("Primera componente del embedding de bucket")
-    right.set_title("Los 10 vectores aprendidos, sobre su eje principal")
-    right.grid(alpha=0.25)
-
-    figure.suptitle(title)
     figure.tight_layout()
     return _save(figure, path)
 

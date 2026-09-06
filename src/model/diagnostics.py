@@ -310,22 +310,15 @@ def price_bucket_recovery(
     *,
     column: str = "price_position",
 ) -> pd.DataFrame:
-    """Did the model learn the inverted U, or only learn to rank?
-
-    For every bucket in turn, every row is re-encoded *as if* its price sat in that
-    bucket -- the bucket index and the standardised value both moved, everything else
-    held -- and scored. The resulting curve is the model's own price response, held
-    against the buy rate the same buckets actually show. A model that only learned a
-    monotone price effect produces a line here; ``docs/EDA.md`` says the truth is a
-    hump.
-    """
+    """The model's own price response: every row scored again as if its price sat in
+    each bucket in turn, against the buy rate those buckets actually show."""
     import torch
 
+    from src.model.encoding import PRICE_SLICE
     from src.model.training import predict
 
     if column not in encoder.spec.numeric_fields:
         raise ValueError(f"{column} is not one of the encoded numeric fields")
-    position = encoder.spec.numeric_fields.index(column)
 
     rows = frame.iloc[list(indices)]
     raw = rows[column].to_numpy(dtype=np.float64)
@@ -333,8 +326,8 @@ def price_bucket_recovery(
     assigned = np.digitize(raw, edges)
     observed = rows["bought"].to_numpy().astype(float)
 
-    encoded = encoder.transform(frame, indices)
-    as_is = predict(model, encoded)
+    text_batch, tab_batch = encoder.transform(frame, indices)
+    as_is = predict(model, (text_batch, tab_batch))
 
     records = []
     for bucket in range(len(edges) + 1):
@@ -342,19 +335,10 @@ def price_bucket_recovery(
         if not members.any():
             continue
         centre = float(raw[members].mean())
-        counterfactual = replace(
-            encoded,
-            numeric_values=encoded.numeric_values.clone(),
-            numeric_buckets=encoded.numeric_buckets.clone(),
-            numeric_ratios=encoded.numeric_ratios.clone(),
-        )
-        counterfactual.numeric_buckets[:, position] = bucket
-        counterfactual.numeric_values[:, position] = float(
-            encoder.standardise(column, np.array([centre]))[0]
-        )
-        counterfactual.numeric_ratios[:, position, :] = torch.from_numpy(
-            encoder.piecewise_ratios(column, np.array([centre]))[0]
-        ).to(encoded.numeric_ratios.device)
+        pieces = torch.from_numpy(encoder.tabular_price_ratios(np.array([centre]))[0])
+        x_tab = tab_batch.x_tab.clone()
+        x_tab[:, PRICE_SLICE] = pieces.to(x_tab)
+        counterfactual = (text_batch, replace(tab_batch, x_tab=x_tab))
         records.append(
             {
                 "bucket": bucket,
@@ -368,29 +352,39 @@ def price_bucket_recovery(
     return pd.DataFrame(records)
 
 
-def bucket_embedding_axis(model, encoder, column: str = "price_position") -> pd.DataFrame:
-    """The learned bucket vectors collapsed onto their first principal component.
+def tower_norms(model, encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
+    """Per-row length of each tower's output: whether the two branches are within an
+    order of magnitude, and whether the length varies by row at all."""
+    import torch
 
-    Ten free vectors in 64 dimensions cannot be read directly, but almost all of their
-    variation lies on one axis, and the *shape* along it is what the slide claims. The
-    sign is arbitrary and fixed by a convention (the largest loading is positive), so
-    the shape is the claim, never the direction.
-    """
-    if model.numbers is None or model.numbers.buckets is None:
-        raise ValueError("this configuration has no bucket table to read")
-    position = encoder.spec.numeric_fields.index(column)
-    n_buckets = model.numbers.n_buckets
-    table = (
-        model.numbers.buckets.weight.detach()
-        .cpu()
-        .numpy()[position * n_buckets : (position + 1) * n_buckets]
-    )
+    from src.model.training import INFERENCE_BATCH
 
-    centred = table - table.mean(axis=0)
-    _, _, components = np.linalg.svd(centred, full_matrices=False)
-    axis = components[0]
-    if axis[np.argmax(np.abs(axis))] < 0:
-        axis = -axis
+    text_batch, tab_batch = encoder.transform(frame, indices)
+    device = next(model.parameters()).device
+    model.eval()
+
+    lengths: dict[str, list[np.ndarray]] = {"h_text": [], "h_tab": []}
+    with torch.no_grad():
+        for start in range(0, len(tab_batch), INFERENCE_BATCH):
+            rows = torch.arange(start, min(start + INFERENCE_BATCH, len(tab_batch)))
+            h_text = model.text_tower(text_batch.select(rows).to(device))
+            h_tab = model.tabular_tower(tab_batch.select(rows).to(device).x_tab)
+            lengths["h_text"].append(h_text.norm(dim=-1).cpu().numpy())
+            lengths["h_tab"].append(h_tab.norm(dim=-1).cpu().numpy())
+            dimensions = {"h_text": h_text.shape[-1], "h_tab": h_tab.shape[-1]}
+
     return pd.DataFrame(
-        {"bucket": np.arange(n_buckets), "component": centred @ axis}
+        [
+            {
+                "tower": name,
+                "dimensions": int(dimensions[name]),
+                "mean": float(values.mean()),
+                "sd": float(values.std()),
+                "min": float(values.min()),
+                "max": float(values.max()),
+            }
+            for name, values in (
+                (name, np.concatenate(parts)) for name, parts in lengths.items()
+            )
+        ]
     )

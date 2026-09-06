@@ -13,9 +13,12 @@ from src.model.encoding import TextBatch
 INIT_STD = 0.02
 N_TOKEN_TYPES = 3
 
+LINEAR, MLP = "linear", "mlp"
+ARCHITECTURES: tuple[str, ...] = (LINEAR, MLP)
+
 
 def _init_weights(module: nn.Module) -> None:
-    """Initialize Transformer linear and embedding layers consistently."""
+    """Zeroes the ``[PAD]`` row, which ``padding_idx`` then freezes for the whole run."""
     if isinstance(module, nn.Linear):
         nn.init.normal_(module.weight, mean=0.0, std=INIT_STD)
         if module.bias is not None:
@@ -28,22 +31,19 @@ def _init_weights(module: nn.Module) -> None:
 
 
 class FirstTokenPooling(nn.Module):
-    """Use the contextualized first position as the row representation."""
-
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        # position 0 is never padding, so ``mask`` goes unread here
         return x[:, 0]
 
 
 class MeanPooling(nn.Module):
-    """Average real text positions and exclude padding."""
-
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         weights = mask.unsqueeze(-1).to(dtype=x.dtype)
         return (x * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
 
 
 class AttentionPooling(nn.Module):
-    """A learned query that decides how much each position contributes."""
+    """A query that is a parameter, not derived from the sequence."""
 
     def __init__(self, d_model: int) -> None:
         super().__init__()
@@ -55,8 +55,28 @@ class AttentionPooling(nn.Module):
         return (torch.softmax(scores, dim=-1).unsqueeze(-1) * x).sum(dim=1)
 
 
+def _stack(
+    input_dim: int,
+    hidden_dim: int,
+    output_dim: int,
+    dropout: float,
+    architecture: str,
+) -> nn.Sequential:
+    """Without the hidden layer the output can only add its inputs."""
+    if architecture == LINEAR:
+        return nn.Sequential(nn.Linear(input_dim, output_dim))
+    if architecture == MLP:
+        return nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim),
+        )
+    raise ValueError(f"unknown architecture {architecture!r}; expected {ARCHITECTURES}")
+
+
 def sinusoidal(length: int, d_model: int) -> torch.Tensor:
-    """The fixed encoding from *Attention is All you Need*."""
+    """Sines and cosines at geometrically spaced frequencies."""
     position = torch.arange(length).unsqueeze(1).float()
     step = torch.exp(
         torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
@@ -68,8 +88,6 @@ def sinusoidal(length: int, d_model: int) -> torch.Tensor:
 
 
 class TextTower(nn.Module):
-    """Embed and contextualize a ``TextBatch``, then pool it to ``(B, d_model)``."""
-
     def __init__(self, vocabulary_size: int, sequence_length: int, config) -> None:
         super().__init__()
         d_model = config.d_model
@@ -90,9 +108,6 @@ class TextTower(nn.Module):
             Block(d_model, config.n_heads, config.dropout)
             for _ in range(config.n_layers)
         )
-        # Normalizes the pooled vector, which is what the pooling modes that average
-        # several tokens need; it is not the encoder stack's final LayerNorm.
-        self.output_norm = nn.LayerNorm(d_model)
         self.pooler = self._pooler(config.pooling, d_model)
         self.apply(_init_weights)
 
@@ -107,7 +122,6 @@ class TextTower(nn.Module):
         raise ValueError(f"unknown pooling: {name}")
 
     def embed(self, batch: TextBatch) -> tuple[torch.Tensor, torch.Tensor]:
-        """Build the text sequence and its real-position mask."""
         mask = batch.attention_mask.bool()
         x = self.tokens(batch.input_ids) + self.segments(batch.token_type_ids)
 
@@ -122,7 +136,7 @@ class TextTower(nn.Module):
         x, mask = self.embed(batch)
         for block in self.blocks:
             x = block(x, mask)
-        return self.output_norm(self.pooler(x, mask))
+        return self.pooler(x, mask)
 
     def attention_of_cls(self, batch: TextBatch) -> torch.Tensor:
         """Attention from ``[CLS]``: ``(rows, layers, heads, positions)``."""
@@ -135,7 +149,7 @@ class TextTower(nn.Module):
 
 
 class TabularTower(nn.Module):
-    """Project a dense tabular row into its late-fusion representation."""
+    """On PyTorch's default init: ``INIT_STD`` would reach the fusion far quieter."""
 
     def __init__(
         self,
@@ -143,34 +157,17 @@ class TabularTower(nn.Module):
         hidden_dim: int = 32,
         output_dim: int = 16,
         dropout: float = 0.1,
-        architecture: str = "mlp",
+        architecture: str = MLP,
     ) -> None:
         super().__init__()
-        if architecture == "linear":
-            modules = [
-                nn.Linear(input_dim, output_dim),
-                nn.LayerNorm(output_dim),
-            ]
-        elif architecture == "mlp":
-            modules = [
-                nn.Linear(input_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, output_dim),
-                nn.LayerNorm(output_dim),
-            ]
-        else:
-            raise ValueError(f"unknown tabular tower: {architecture}")
-        self.layers = nn.Sequential(*modules)
-        self.apply(_init_weights)
+        self.layers = _stack(input_dim, hidden_dim, output_dim, dropout, architecture)
 
     def forward(self, x_tab: torch.Tensor) -> torch.Tensor:
-        """Map ``(B, input_dim)`` to a normalized ``(B, output_dim)``."""
         return self.layers(x_tab)
 
 
 class FusionHead(nn.Module):
-    """Concatenate both tower representations and produce one logit per row."""
+    """The concatenation only stacks the two vectors; this is what mixes them."""
 
     def __init__(
         self,
@@ -178,25 +175,12 @@ class FusionHead(nn.Module):
         tabular_dim: int,
         hidden_dim: int = 32,
         dropout: float = 0.1,
-        architecture: str = "mlp",
+        architecture: str = MLP,
     ) -> None:
         super().__init__()
-        input_dim = text_dim + tabular_dim
-        if architecture == "linear":
-            modules = [nn.Linear(input_dim, 1)]
-        elif architecture == "mlp":
-            modules = [
-                nn.Linear(input_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, 1),
-            ]
-        else:
-            raise ValueError(f"unknown fusion head: {architecture}")
-        self.layers = nn.Sequential(*modules)
-        self.apply(_init_weights)
+        self.layers = _stack(
+            text_dim + tabular_dim, hidden_dim, 1, dropout, architecture
+        )
 
     def forward(self, h_text: torch.Tensor, h_tab: torch.Tensor) -> torch.Tensor:
-        """Fuse ``(B, text_dim)`` and ``(B, tabular_dim)`` into ``(B,)`` logits."""
-        fused = torch.cat((h_text, h_tab), dim=-1)
-        return self.layers(fused).squeeze(-1)
+        return self.layers(torch.cat((h_text, h_tab), dim=-1)).squeeze(-1)
