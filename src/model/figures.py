@@ -1540,3 +1540,66 @@ def gap_by_epoch(frame: pd.DataFrame, *, title: str, path: Path) -> Path:
     figure.suptitle(title)
     figure.tight_layout()
     return _save(figure, path)
+
+
+def tokenizer_ablation(measured, *, title: str, path: Path) -> Path:
+    """Una fila por variante, el punto es la media entre semillas y la barra su desvío.
+
+    El control va último y en otro color: la lectura de D1 no es cuál gana sino si el
+    control vuelve al nivel del regex, y ponerlo aparte evita que se lea como una
+    carrera de tres.
+    """
+    figure, axes = plt.subplots(figsize=(10, 1.3 * len(measured) + 1.8))
+    positions = list(range(len(measured)))[::-1]
+
+    for position, item in zip(positions, measured):
+        colour = HIGHLIGHT if "control" in item.cell.label else MODEL_COLOR
+        axes.errorbar(
+            item.mean, position, xerr=item.spread,
+            fmt="o", markersize=9, color=colour,
+            elinewidth=1.6, capsize=4, zorder=3,
+        )
+        axes.text(
+            item.mean, position + 0.24, f"{item.mean:.3f}",
+            ha="center", fontsize=10, color=colour,
+        )
+
+    axes.set_yticks(positions)
+    axes.set_yticklabels([item.cell.label for item in measured], fontsize=10)
+    axes.set_xlabel("Average precision (media de 3 semillas, barra = ±1 desvío)")
+    axes.set_title(title)
+    axes.grid(axis="x", alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.margins(x=0.18, y=0.22)
+    _framed(axes)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def interaction_grid(table, *, title: str, path: Path) -> Path:
+    """El 2×2 de D10 con el PR-AUC en cada celda.
+
+    La lectura es si la ganancia aparece en una sola celda. El sombreado va por valor
+    para que eso se vea sin comparar decimales.
+    """
+    figure, axes = plt.subplots(figsize=(7.5, 5.5))
+    image = axes.imshow(table, cmap="Blues", aspect="auto")
+
+    for row in range(table.shape[0]):
+        for column in range(table.shape[1]):
+            value = table[row, column]
+            midpoint = (table.max() + table.min()) / 2
+            axes.text(
+                column, row, f"{value:.3f}",
+                ha="center", va="center", fontsize=17,
+                color="white" if value > midpoint else "#22211f",
+            )
+
+    axes.set_xticks([0, 1])
+    axes.set_xticklabels(["sin paréntesis", "con paréntesis"], fontsize=11)
+    axes.set_yticks([0, 1])
+    axes.set_yticklabels(["positional\nlearned", "positional\nnone"], fontsize=11)
+    axes.set_title(title)
+    figure.colorbar(image, ax=axes, label="Average precision", shrink=0.82)
+    figure.tight_layout()
+    return _save(figure, path)
