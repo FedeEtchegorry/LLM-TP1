@@ -31,6 +31,7 @@ from sklearn.metrics import (
 )
 
 from src.eda.loading import NO_PHRASE
+from src.model.encoding import text_or_empty
 
 Z_95 = 1.959963984540054
 """Two-sided 95%: the interval every observed rate in these tables carries."""
@@ -205,48 +206,43 @@ def errors_by_level(
 PHRASE_GROUP = "frase de popularidad"
 TITLE_REST = "titulo (resto)"
 CLS_GROUP = "[CLS]"
+SEP_GROUP = "[SEP]"
+PADDING_GROUP = "(padding)"
+
+
+def phrase_tokens(encoder, row) -> int:
+    """The trailing parenthesis of a title, measured in the run's own tokens.
+
+    Encoding the title and the title without its parenthesis and subtracting is exact
+    for any tokenizer, brackets kept or removed, without assuming how it splits.
+    """
+    title = text_or_empty(getattr(row, "title", ""))
+    if getattr(row, "popularity_phrase", NO_PHRASE) == NO_PHRASE or "(" not in title:
+        return 0
+    return len(encoder.encode(title)) - len(encoder.encode(title[: title.rindex("(")]))
 
 
 def position_groups(encoder, frame: pd.DataFrame, indices) -> list[list[str]]:
     """Name every position of every row, so attention can be summed by meaning.
 
     The popularity phrase is the parenthesis at the end of the title, so its tokens are
-    the last tokens of the title field. Separating them from the other ~35 title tokens
-    is the whole point: "attention on the title" would say nothing, "attention on the
-    two words that decide the label" says everything.
+    the last ones that field kept. Separating them from the other title tokens is the
+    whole point: "attention on the title" would say nothing, "attention on the two
+    words that decide the label" says everything.
     """
-    spec = encoder.spec
     rows = frame.iloc[list(indices)]
-    text_width = encoder.text_width
-
-    from src.model.encoding import tokenize
-
     named: list[list[str]] = []
-    for row in rows.itertuples(index=False):
-        per_field = [
-            (name, len(tokenize(getattr(row, name)))) for name in spec.text_fields
-        ]
-        labels: list[str] = []
-        phrase = getattr(row, "popularity_phrase", NO_PHRASE)
-        phrase_tokens = len(tokenize(phrase)) if phrase != NO_PHRASE else 0
-        remaining = text_width
-        for name, count in per_field:
-            kept = min(count, remaining)
-            field_labels = [name] * kept
-            if name == "title":
-                phrase_start = max(0, kept - phrase_tokens)
-                field_labels[:phrase_start] = [TITLE_REST] * phrase_start
-                if phrase_tokens:
-                    field_labels[phrase_start:] = [PHRASE_GROUP] * (
-                        kept - phrase_start
-                    )
-                else:
-                    field_labels = [TITLE_REST] * kept
-            labels.extend(field_labels)
-            remaining -= kept
-
-        labels.extend(["(padding)"] * remaining)
-        named.append([CLS_GROUP, *labels])
+    for row, spans in zip(rows.itertuples(index=False), encoder.layout(rows)):
+        labels = [CLS_GROUP]
+        for span in spans:
+            field = [span.name] * span.kept
+            if span.name == "title":
+                phrase = min(phrase_tokens(encoder, row), span.kept)
+                field[span.kept - phrase :] = [PHRASE_GROUP] * phrase
+                field[: span.kept - phrase] = [TITLE_REST] * (span.kept - phrase)
+            labels.extend([*field, SEP_GROUP])
+        labels.extend([PADDING_GROUP] * (encoder.sequence_length - len(labels)))
+        named.append(labels)
     return named
 
 
@@ -262,18 +258,20 @@ def cls_attention(
     """
     import torch
 
-    encoded = encoder.transform(frame, indices)
+    text, tabular = encoder.transform(frame, indices)
     groups = position_groups(encoder, frame, indices)
 
     totals: dict[tuple[int, str], float] = {}
     counts: dict[tuple[int, str], int] = {}
-    n_rows = len(encoded)
+    n_rows = len(text)
 
     with torch.no_grad():
         model.eval()
         for start in range(0, n_rows, batch_size):
             rows = torch.arange(start, min(start + batch_size, n_rows))
-            weights = model.attention_of_cls(encoded.select(rows))
+            weights = model.attention_of_cls(
+                (text.select(rows), tabular.select(rows))
+            )
             if weights.numel() == 0:
                 return pd.DataFrame(columns=["layer", "group", "tokens", "mass", "per_token"])
             averaged = weights.mean(dim=2).cpu().numpy()
@@ -281,7 +279,7 @@ def cls_attention(
                 names = groups[start + offset]
                 for layer in range(averaged.shape[1]):
                     for position, name in enumerate(names):
-                        if name == "(padding)":
+                        if name == PADDING_GROUP:
                             continue
                         key = (layer, name)
                         totals[key] = totals.get(key, 0.0) + float(
@@ -349,6 +347,28 @@ def price_bucket_recovery(
                 "as_is": float(as_is[members].mean()),
             }
         )
+    return pd.DataFrame(records)
+
+
+def text_truncation(encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
+    """How much of each text field the token budget cut, field by field.
+
+    The row that matters is ``title``: the popularity phrase sits at its end, so a
+    single dropped token there is the strongest variable of the dataset going missing.
+    """
+    rows = frame.iloc[list(indices)]
+    layouts = encoder.layout(rows)
+    records = [
+        {
+            "field": name,
+            "tokens": sum(layout[position].total for layout in layouts) / len(layouts),
+            "rows_truncated": sum(
+                1 for layout in layouts if layout[position].dropped
+            ),
+            "tokens_dropped": sum(layout[position].dropped for layout in layouts),
+        }
+        for position, name in enumerate(encoder.spec.text_fields)
+    ]
     return pd.DataFrame(records)
 
 

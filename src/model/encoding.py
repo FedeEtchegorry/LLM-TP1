@@ -21,6 +21,7 @@ from src.eda.aspects.composition import NO_ALLERGENS, NUTRITION_SENTINEL
 from src.model.tokenization import (
     CLS,
     PAD,
+    SEP,
     WORDPIECE,
     Tokenizer,
     tokenizer_for,
@@ -97,12 +98,46 @@ class EncodingSpec:
     """WordPiece with the parentheses is the architecture; the word regex stays
     reachable as the ablation's control. Both reach the run's digest."""
     max_text_tokens: int = 64
-    """Ceiling on the word positions the three fields share; the width actually used is
-    the longest training row, which is refitted per fold."""
+    """Token budget the three text fields share, specials excluded. The sequence adds
+    ``[CLS]`` and one ``[SEP]`` per field, and is the same width for every fold."""
 
     def __post_init__(self) -> None:
         if not (self.text_fields or self.categorical_fields or self.numeric_fields):
             raise ValueError("a spec must carry at least one field")
+
+
+@dataclass(frozen=True)
+class FieldSpan:
+    """Where one text field sits in a row, and how many of its tokens did not fit."""
+
+    name: str
+    start: int
+    kept: int
+    total: int
+
+    @property
+    def dropped(self) -> int:
+        return self.total - self.kept
+
+
+def longest_first(totals: list[int], budget: int) -> list[int]:
+    """Share the budget by trimming the longest field, not by consuming left to right.
+
+    No field is emptied while another one still has tokens to give up, and a tie is
+    resolved against the later field: the end of the title is where the phrase lives.
+    """
+    if sum(totals) <= budget:
+        return list(totals)
+    cap = 0
+    while sum(min(total, cap + 1) for total in totals) <= budget:
+        cap += 1
+    kept = [min(total, cap) for total in totals]
+    for position, total in enumerate(totals):
+        if sum(kept) >= budget:
+            break
+        if total > kept[position]:
+            kept[position] += 1
+    return kept
 
 
 @dataclass(frozen=True)
@@ -201,13 +236,11 @@ class RowEncoder:
     _tabular_price_bounds: np.ndarray = field(
         default_factory=lambda: np.empty(0), init=False
     )
-    _text_width: int = field(default=0, init=False)
     _fitted: bool = field(default=False, init=False)
 
     def fit(self, frame: pd.DataFrame, train_indices) -> Self:
         training = frame.iloc[list(train_indices)]
         self._fit_tokenizer(training)
-        self._fit_width(training)
         self._fit_numbers(training)
         self._fit_tabular_price(training)
         self._fitted = True
@@ -242,17 +275,19 @@ class RowEncoder:
 
     @property
     def sequence_length(self) -> int:
-        """Padded width of ``[CLS]`` followed by word-token positions."""
-        return 1 + self._text_width
+        """Fixed width: ``[CLS]``, the shared budget, and one ``[SEP]`` per field."""
+        return 1 + self.spec.max_text_tokens + len(self.spec.text_fields)
 
     @property
     def n_numeric(self) -> int:
         return len(self.spec.numeric_fields)
 
-    @property
-    def text_width(self) -> int:
-        """How many positions the text fields occupy, after ``[CLS]``."""
-        return self._text_width
+    def layout(self, rows: pd.DataFrame) -> list[tuple[FieldSpan, ...]]:
+        """Where every field lands in every row, once the budget has been shared out."""
+        return [
+            self._spans(self._row_tokens(row))
+            for row in rows.itertuples(index=False)
+        ]
 
     def bucket_edges(self, name: str) -> np.ndarray:
         """The training quantile cuts for one numeric column, for interpretability."""
@@ -271,16 +306,6 @@ class RowEncoder:
         self._tokenizer = tokenizer_for(
             self.spec.tokenizer, self.spec.keep_brackets
         ).fit(texts)
-
-    def _fit_width(self, training: pd.DataFrame) -> None:
-        """The widest training row, capped: the sequence is as long as the fold needs."""
-        longest = 0
-        for row in training.itertuples(index=False):
-            longest = max(
-                longest,
-                sum(len(self.encode(getattr(row, name))) for name in self.spec.text_fields),
-            )
-        self._text_width = min(longest, self.spec.max_text_tokens)
 
     def _fit_numbers(self, training: pd.DataFrame) -> None:
         self._centres, self._scales, self._edges, self._bounds = {}, {}, {}, {}
@@ -317,8 +342,21 @@ class RowEncoder:
         quantiles = np.linspace(0.0, 1.0, PRICE_PIECES + 1)
         self._tabular_price_bounds = self._interval_bounds(filled, quantiles)
 
+    def _row_tokens(self, row) -> list[list[int]]:
+        return [self.encode(getattr(row, name)) for name in self.spec.text_fields]
+
+    def _spans(self, tokens: list[list[int]]) -> tuple[FieldSpan, ...]:
+        kept = longest_first(
+            [len(field) for field in tokens], self.spec.max_text_tokens
+        )
+        spans, cursor = [], 1
+        for name, field, keep in zip(self.spec.text_fields, tokens, kept):
+            spans.append(FieldSpan(name, cursor, keep, len(field)))
+            cursor += keep + 1
+        return tuple(spans)
+
     def _text_batch(self, rows: pd.DataFrame) -> TextBatch:
-        """Build a text-only sequence with no categorical or numeric positions."""
+        """``[CLS] title [SEP] description [SEP] ingredients [SEP]``, then padding."""
         width = self.sequence_length
         input_ids = np.full((len(rows), width), PAD, dtype=np.int64)
         attention_mask = np.zeros((len(rows), width), dtype=bool)
@@ -328,16 +366,16 @@ class RowEncoder:
         attention_mask[:, 0] = True
 
         for row_position, row in enumerate(rows.itertuples(index=False)):
-            cursor = 1
-            for position, name in enumerate(self.spec.text_fields):
-                token_type = _TOKEN_TYPE.get(name, position)
-                for token in self.encode(getattr(row, name)):
-                    if cursor >= width:
-                        break
-                    input_ids[row_position, cursor] = token
-                    token_type_ids[row_position, cursor] = token_type
-                    attention_mask[row_position, cursor] = True
-                    cursor += 1
+            tokens = self._row_tokens(row)
+            for position, (span, field) in enumerate(
+                zip(self._spans(tokens), tokens)
+            ):
+                token_type = _TOKEN_TYPE.get(span.name, position)
+                end = span.start + span.kept
+                input_ids[row_position, span.start : end] = field[: span.kept]
+                input_ids[row_position, end] = SEP
+                token_type_ids[row_position, span.start : end + 1] = token_type
+                attention_mask[row_position, span.start : end + 1] = True
 
         return TextBatch(
             input_ids=torch.from_numpy(input_ids),
