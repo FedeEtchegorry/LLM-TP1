@@ -1603,3 +1603,38 @@ def interaction_grid(table, *, title: str, path: Path) -> Path:
     figure.colorbar(image, ax=axes, label="Average precision", shrink=0.82)
     figure.tight_layout()
     return _save(figure, path)
+
+
+def learning_curves(curves, *, title: str, path: Path) -> Path:
+    """Dos curvas contra el tamaño del entrenamiento, en escala logarítmica.
+
+    ``curves`` es ``{etiqueta: [(filas, media, desvío), ...]}``. El eje x va en log
+    porque los tamaños se eligieron por décadas y porque la pendiente que interesa leer
+    es AP por década de filas, que en lineal no se ve como una recta.
+    """
+    figure, axes = plt.subplots(figsize=FIGSIZE)
+
+    for index, (label, points) in enumerate(curves.items()):
+        colour = PALETTE[index % len(PALETTE)]
+        sizes = [size for size, _, _ in points]
+        means = np.array([mean for _, mean, _ in points])
+        spreads = np.array([spread for _, _, spread in points])
+        axes.plot(sizes, means, "o-", color=colour, linewidth=1.8,
+                  markersize=6, label=label, zorder=3)
+        axes.fill_between(sizes, means - spreads, means + spreads,
+                          color=colour, alpha=0.16, zorder=2)
+
+    axes.set_xscale("log")
+    ticks = sorted({size for points in curves.values() for size, _, _ in points})
+    axes.set_xticks(ticks)
+    axes.set_xticklabels([f"{tick:,}".replace(",", ".") for tick in ticks], fontsize=10)
+    axes.minorticks_off()
+    axes.set_xlabel("Filas de entrenamiento por fold (escala logarítmica)")
+    axes.set_ylabel("Average precision (validación cruzada)")
+    axes.set_title(title)
+    axes.grid(alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.legend(loc="best", fontsize=10)
+    _framed(axes)
+    figure.tight_layout()
+    return _save(figure, path)

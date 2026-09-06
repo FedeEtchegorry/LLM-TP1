@@ -102,6 +102,12 @@ class Measured:
         return seed_spread([list(run) for run in self.runs], label=self.cell.key)
 
 
+FLOAT_TOLERANCE = 1e-12
+"""Guarda contra ruido de coma flotante, no un umbral con significado. Sin ella, dos
+mediciones de dispersión nula se separan por 1e-16 y la comparación se vuelve un
+volado."""
+
+
 def distinguishable(delta: float, spreads: tuple[float, ...]) -> bool:
     """Regla declarada, no un test: una diferencia cuenta si supera la suma de las
     dispersiones entre semillas de las dos celdas que compara.
@@ -111,7 +117,7 @@ def distinguishable(delta: float, spreads: tuple[float, ...]) -> bool:
     fabricar un p-valor acá sería darle a un número descriptivo una autoridad que no
     tiene. Lo que se reporta es la regla y el resultado de aplicarla.
     """
-    return abs(delta) > sum(spreads)
+    return abs(delta) > sum(spreads) + FLOAT_TOLERANCE
 
 
 def _by_key(measured: list[Measured]) -> dict[str, Measured]:
