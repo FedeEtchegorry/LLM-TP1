@@ -1443,3 +1443,100 @@ def final_candidates_bar(rows: list[dict], *, title: str, path: Path) -> Path:
     _framed(axes)
     figure.tight_layout()
     return _save(figure, path)
+
+
+def generalisation_ladder(levels, *, title: str, path: Path) -> Path:
+    """One point per row set, so the drop is read as a distance and not as two numbers.
+
+    Drawn top-to-bottom in the order the model met the rows -- ``fit`` first, holdout
+    last -- with the step between consecutive points annotated. The annotation is the
+    figure's whole point: a wide first step and a flat second one is a different
+    diagnosis from the reverse, and a bare pair of bars cannot tell them apart.
+    """
+    figure, axes = plt.subplots(figsize=(9, 1.35 * len(levels) + 1.6))
+    positions = list(range(len(levels)))[::-1]
+
+    for position, level in zip(positions, levels):
+        colour = MODEL_COLOR if level.name != "test" else BAR_COLOR
+        axes.errorbar(
+            level.average_precision, position,
+            xerr=level.deviation,
+            fmt="o", markersize=9, color=colour,
+            elinewidth=1.6, capsize=4, zorder=3,
+        )
+        axes.text(
+            level.average_precision, position + 0.22,
+            f"{level.average_precision:.3f}",
+            ha="center", fontsize=10, color=colour,
+        )
+
+    for (upper, lower), (high, low) in zip(
+        zip(positions, positions[1:]), zip(levels, levels[1:])
+    ):
+        middle = (upper + lower) / 2
+        axes.annotate(
+            "",
+            xy=(low.average_precision, lower + 0.30),
+            xytext=(high.average_precision, upper - 0.30),
+            arrowprops=dict(arrowstyle="->", color=NEUTRAL, linewidth=1.2),
+        )
+        delta = low.average_precision - high.average_precision
+        axes.text(
+            (high.average_precision + low.average_precision) / 2, middle,
+            f"{delta:+.3f}",
+            ha="center", va="center", fontsize=10, color="#52514e",
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="none"),
+        )
+
+    axes.set_yticks(positions)
+    axes.set_yticklabels([f"{level.name}\n({level.seen})" for level in levels], fontsize=10)
+    axes.set_xlabel("Average precision")
+    axes.set_title(title)
+    axes.grid(axis="x", alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.margins(x=0.16, y=0.20)
+    _framed(axes)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+def gap_by_epoch(frame: pd.DataFrame, *, title: str, path: Path) -> Path:
+    """When the memorisation gap opens, and where early stopping cut the run.
+
+    Left panel is the two AP curves per fold; right panel is their difference. The
+    marker on each curve is the epoch whose weights were kept, so a gap that keeps
+    widening to the right of the marker is a gap the run never paid for.
+    """
+    figure, (left, right) = plt.subplots(1, 2, figsize=WIDE)
+
+    for fold, rows in frame.groupby("fold_index"):
+        colour = PALETTE[int(fold) % len(PALETTE)]
+        rows = rows.sort_values("epoch")
+        left.plot(rows["epoch"], rows["fit_ap"], color=colour, linewidth=1.5,
+                  label=f"fold {fold}")
+        left.plot(rows["epoch"], rows["stop_ap"], color=colour, linewidth=1.5,
+                  linestyle="--")
+        right.plot(rows["epoch"], rows["ap_gap"], color=colour, linewidth=1.5)
+
+        kept = rows[rows["epoch"] == rows["best_epoch"]]
+        if not kept.empty:
+            left.plot(kept["epoch"], kept["stop_ap"], "o", color=colour,
+                      markersize=7, zorder=3)
+            right.plot(kept["epoch"], kept["ap_gap"], "o", color=colour,
+                       markersize=7, zorder=3)
+
+    left.set_xlabel("Época")
+    left.set_ylabel("Average precision")
+    left.set_title("Continua: fit  ·  Punteada: corte  ·  Punto: época elegida")
+    left.grid(alpha=0.25)
+    left.legend(loc="best", fontsize=8, ncol=2)
+
+    right.axhline(0.0, color=NEUTRAL, linewidth=1.0)
+    right.set_xlabel("Época")
+    right.set_ylabel("AP(fit) − AP(corte)")
+    right.set_title("La brecha de memorización")
+    right.grid(alpha=0.25)
+
+    figure.suptitle(title)
+    figure.tight_layout()
+    return _save(figure, path)
