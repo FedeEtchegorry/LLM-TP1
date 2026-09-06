@@ -13,7 +13,7 @@ import argparse
 from pathlib import Path
 
 from src.model.console import utf8_console
-from src.model.diagram import one_tower, render, two_towers
+from src.model.diagram import one_tower, personalised, render, two_towers
 from src.model.figures import FIGURES_DIR
 
 
@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None) -> int:
             one_tower(),
             title="Arquitectura de una sola torre — primera entrega",
             path=directory / "one-tower.png",
+        ),
+        render(
+            personalised(),
+            title="Cómo entraría la personalización de usuario",
+            path=directory / "personalised.png",
         ),
     ]
     for path in written:

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.model.style import BAR_COLOR, NEUTRAL, OBSERVED_COLOR
+from src.model.style import BAR_COLOR, HIGHLIGHT, NEUTRAL, OBSERVED_COLOR
 from src.model.style import save as _save
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -34,6 +34,7 @@ TEXT_COLOR = OBSERVED_COLOR
 TABULAR_COLOR = "#D98C00"
 FUSION_COLOR = "#52514e"
 OUTPUT_COLOR = BAR_COLOR
+HIGHLIGHT_COLOR = HIGHLIGHT
 
 BOX_HEIGHT = 9.0
 EDGE_LABEL_SIZE = 8.5
@@ -263,6 +264,80 @@ def two_towers() -> Diagram:
             "torre tabular D6 · fusión y MLP de salida D5"
         ),
         figsize=(13.0, 15.0),
+    )
+
+
+def personalised() -> Diagram:
+    """Ejercicio 3: where a user factor would enter, and what it would cost elsewhere.
+
+    The slide's first claim is about data, not architecture. The dataset has 22 columns
+    and none of them identifies a person -- ``query_id`` is a search, not a user -- so
+    the current target is a per-product marginal ``P(bought | producto)`` and no
+    architectural change makes it conditional on someone.
+
+    The second claim is that the user tower should reuse the text encoder rather than
+    learn an id embedding. An id table has nothing to say about a user seen once, and
+    most users are seen once; a user described by the titles of what they bought is a
+    sequence the existing tower already knows how to read.
+
+    The third is that the fusion has to be multiplicative. Personalisation *is* an
+    interaction -- the same product ranking differently for two people -- and a
+    concatenation followed by a linear layer can only add the two contributions.
+    """
+    text_x, user_x, tab_x = 16.0, 48.0, 82.0
+    gate_x, mid_x = 32.0, 57.0
+    boxes = (
+        Box("text_in", "Producto: texto", text_x, 94, 28,
+            ("title · description", "ingredients"), TEXT_COLOR, height=12.0),
+        Box("user_in", "Usuario: historial", user_x, 94, 28,
+            ("títulos de lo que compró", "o vio antes"),
+            HIGHLIGHT_COLOR, height=12.0),
+        Box("tab_in", "Producto: tabular", tab_x, 94, 28,
+            ("category · allergens", "price_position"), TABULAR_COLOR, height=12.0),
+
+        Box("text_tower", "Torre de texto", text_x, 74, 28,
+            ("encoder + pooler", "sin cambios"), TEXT_COLOR, height=12.0),
+        Box("user_tower", "Torre de usuario", user_x, 74, 28,
+            ("el mismo encoder,", "pesos compartidos", "→ media sobre el historial"),
+            HIGHLIGHT_COLOR, dashed=True, height=13.5),
+        Box("tab_tower", "Torre tabular", tab_x, 74, 28,
+            ("MLP", "sin cambios"), TABULAR_COLOR, height=12.0),
+
+        Box("gate", "Modulación (FiLM)", gate_x, 50, 34,
+            ("h_text ⊙ σ(W·h_user) + b(h_user)",
+             "el usuario cambia cómo se lee el texto"),
+            HIGHLIGHT_COLOR, dashed=True, height=11.5),
+        Box("fusion", "Fusión", mid_x, 26, 28, ("concat",), FUSION_COLOR, height=9.0),
+        Box("head", "MLP de salida", mid_x, 8, 32,
+            ("Linear → ReLU → Linear",), FUSION_COLOR, height=9.5),
+        Box("output", "p(bought | producto, usuario)", mid_x, -9, 40,
+            ("BTR personalizado",), OUTPUT_COLOR, height=9.5),
+    )
+    edges = (
+        Edge("text_in", "text_tower", ""),
+        Edge("user_in", "user_tower", ""),
+        Edge("tab_in", "tab_tower", ""),
+        Edge("text_tower", "gate", "h_text", elbow=True, entry_dx=-8.0),
+        Edge("user_tower", "gate", "h_user", elbow=True, entry_dx=8.0),
+        Edge("gate", "fusion", "", elbow=True, entry_dx=-6.0),
+        Edge("tab_tower", "fusion", "h_tab", elbow=True, entry_dx=6.0),
+        Edge("fusion", "head", ""),
+        Edge("head", "output", "logit"),
+    )
+    return Diagram(
+        boxes=boxes,
+        edges=edges,
+        footnote=(
+            "El dataset no tiene columna de usuario: query_id es una búsqueda, no una "
+            "persona. Sin ese dato\n"
+            "el BTR es una marginal por producto y ninguna arquitectura lo vuelve "
+            "condicional.\n\n"
+            "Lo que también cambia: la partición pasa a ser por usuario y no por "
+            "query · la métrica pasa a ser\n"
+            "ranking por usuario (NDCG@k) y no PR-AUC global · el BTR deja de ser una "
+            "propiedad del producto."
+        ),
+        figsize=(12.5, 12.0),
     )
 
 
