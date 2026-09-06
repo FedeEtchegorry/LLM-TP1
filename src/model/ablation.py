@@ -7,18 +7,31 @@ el modelo ve un multiconjunto de tokens y el paréntesis está presente pero es 
 como delimitador.
 
 Los dos tickets se miden sobre la misma grilla porque **comparten dos celdas**. El caché
-va por digest, así que declararlas una sola vez hace que correr los dos cueste cinco
-configuraciones y no siete:
+va por digest, así que declararlas una sola vez hace que correr los dos cueste seis
+configuraciones y no ocho:
 
 ======  ===========  ==============  ============  ==========
 celda   tokenizer    keep_brackets   positional    tickets
 ======  ===========  ==============  ============  ==========
 A       whole-word   False           learned       D1
+F       whole-word   True            learned       D1
 B       wordpiece    True            learned       D1, D10
 C       wordpiece    False           learned       D1, D10
 D       wordpiece    True            none          D10
 E       wordpiece    False           none          D10
 ======  ===========  ==============  ============  ==========
+
+D1 son las cuatro primeras: un 2x2 de ``tokenizer`` por ``keep_brackets``, no un eje de
+tres brazos. Un eje de tres mueve las subpalabras y la puntuación a la vez entre v1 y la
+propuesta, y ninguna diferencia queda atribuible a una sola de las dos.
+
+Las dos filas no son simétricas y conviene decirlo antes de que lo pregunten. En
+``wordpiece`` el factor es limpio: ``keep_brackets=False`` borra los paréntesis y deja el
+resto de la puntuación intacta. En ``whole-word`` es más grueso, porque ``False`` tiene que
+reproducir v1 exactamente y v1 borraba toda la puntuación; ``True`` devuelve la puntuación
+entera, no sólo los paréntesis. La afirmación fuerte sobre los paréntesis vive en la fila
+``wordpiece``; la fila ``whole-word`` aporta la línea base histórica y el contraste de
+palabras enteras.
 
 **D1 corre con ``positional = learned`` fijo, y eso no es un detalle.** Corrido con
 ``positional = none`` las cuatro celdas de texto miden lo mismo, D1 daría cero y la
@@ -71,7 +84,8 @@ class Cell:
 
 
 GRID = (
-    Cell("A", "regex de v1 (sin paréntesis)", WHOLE_WORD, False, LEARNED, (D1,)),
+    Cell("A", "regex de v1 (sin puntuación)", WHOLE_WORD, False, LEARNED, (D1,)),
+    Cell("F", "palabras enteras con puntuación", WHOLE_WORD, True, LEARNED, (D1,)),
     Cell("B", "WordPiece con paréntesis", WORDPIECE, True, LEARNED, (D1, D10)),
     Cell("C", "WordPiece sin paréntesis (control)", WORDPIECE, False, LEARNED, (D1, D10)),
     Cell("D", "WordPiece con paréntesis · positional=none", WORDPIECE, True, NONE, (D10,)),
@@ -125,23 +139,33 @@ def _by_key(measured: list[Measured]) -> dict[str, Measured]:
 
 
 def read_d1(measured: list[Measured]) -> str:
-    """La conclusión de D1, escrita en cualquiera de los sentidos en que salga."""
+    """La conclusión de D1, escrita en cualquiera de los sentidos en que salga.
+
+    Los cuatro contrastes del 2x2 se reportan siempre; la conclusión la deciden los dos
+    de la fila ``wordpiece`` y la columna sin puntuación, que son los limpios.
+    """
     found = _by_key(measured)
-    missing = {"A", "B", "C"} - set(found)
+    missing = {"A", "F", "B", "C"} - set(found)
     if missing:
         return f"D1 incompleto: faltan las celdas {sorted(missing)}"
 
-    a, b, c = found["A"], found["B"], found["C"]
+    a, f, b, c = found["A"], found["F"], found["B"], found["C"]
     brackets = b.mean - c.mean
+    punctuation = f.mean - a.mean
     tokenizer = c.mean - a.mean
+    tokenizer_marked = b.mean - f.mean
     brackets_real = distinguishable(brackets, (b.spread, c.spread))
+    punctuation_real = distinguishable(punctuation, (f.spread, a.spread))
     tokenizer_real = distinguishable(tokenizer, (c.spread, a.spread))
 
     lines = [
-        f"paréntesis (B − C) = {brackets:+.4f}  "
+        f"paréntesis en wordpiece  (B − C) = {brackets:+.4f}  "
         f"{'distinguible' if brackets_real else 'dentro del ruido'}",
-        f"tokenizador (C − A) = {tokenizer:+.4f}  "
+        f"puntuación en whole-word (F − A) = {punctuation:+.4f}  "
+        f"{'distinguible' if punctuation_real else 'dentro del ruido'}",
+        f"tokenizador sin puntuación (C − A) = {tokenizer:+.4f}  "
         f"{'distinguible' if tokenizer_real else 'dentro del ruido'}",
+        f"tokenizador con puntuación (B − F) = {tokenizer_marked:+.4f}",
     ]
     if brackets_real and not tokenizer_real:
         lines.append(
@@ -164,6 +188,11 @@ def read_d1(measured: list[Measured]) -> str:
             "semillas. Se reporta así: en este dataset el vocabulario es cerrado y el "
             "cambio de tokenización no cambia lo que el modelo puede aprender."
         )
+    lines.append(
+        "La fila whole-word (F − A) mide toda la puntuación, no sólo los paréntesis, "
+        "porque su celda sin puntuación tiene que reproducir v1 exactamente. Es la "
+        "línea base histórica, no el factor limpio."
+    )
     return "\n".join(lines)
 
 
