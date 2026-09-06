@@ -151,8 +151,8 @@ def document(
 ) -> dict | None:
     """The whole stored record for one run: metrics, curves, parameter counts.
 
-    ``load`` returns only what the protocol needs; the transfer and final tables also
-    quote how many parameters were trained and how long it took, which live here.
+    ``load`` returns only what the protocol needs; the final table also quotes how
+    many parameters were trained and how long it took, which live here.
     """
     path = _first_existing(
         Path(directory) / f"{digest}.json" for digest in config.compatible_digests

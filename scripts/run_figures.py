@@ -430,19 +430,6 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     report("07-atencion-l2-texto", path)
 
-    if wanted("08-transfer-similitud-frases", args.only):
-        from src.model.pretrained import CONTRAST, contrast_row, phrase_similarity
-
-        pairs = phrase_similarity(frame)
-        contrast = contrast_row(pairs, CONTRAST)
-        path = fig.similarity_against_gap(
-            pairs,
-            contrast=contrast,
-            title="Similitud semantica frente a diferencia de BTR (MiniLM congelado)",
-            path=figures_dir / "08-transfer-similitud-frases.png",
-        )
-        report("08-transfer-similitud-frases", path)
-
     return 0
 
 

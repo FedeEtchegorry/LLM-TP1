@@ -4,8 +4,7 @@
     .venv/Scripts/python -m scripts.run_final --config "L4"
 
 The 20% test split has not been read by anything up to here -- not by the ladder, not
-by the sweep, not by the transfer runs, and not by the early stopping inside any of
-them. This is the one script allowed to touch it, and it touches it once per model:
+by the sweep, and not by the early stopping inside either of them. This is the one script allowed to touch it, and it touches it once per model:
 the configuration that won on cross-validation, and the linear bar it has to beat.
 Both scores are stored, so every table and figure below is a view of that single
 evaluation and never a reason to run another.
@@ -134,7 +133,7 @@ def select(
     if summary.empty:
         raise SystemExit(
             f"no cross-validation runs recorded in {directory}/ -- run "
-            "scripts.run_ladder (and run_modules, run_transfer) before selecting"
+            "scripts.run_ladder (and run_modules) before selecting"
         )
     eligible = summary[summary["name"].isin(declared)]
     if eligible.empty:

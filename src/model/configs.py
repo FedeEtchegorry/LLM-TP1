@@ -33,10 +33,8 @@ TRANSFORMER = "transformer"
 FROZEN = "frozen"
 FINETUNE = "finetune"
 MODELS = (LOGISTIC, TRANSFORMER, FROZEN, FINETUNE)
-"""The four regimes the write-up compares, all reporting into the same protocol."""
 
 PRETRAINED = (FROZEN, FINETUNE)
-"""The two that start from somebody else's weights instead of from noise."""
 
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
@@ -50,11 +48,8 @@ LADDER_NAME = re.compile(r"^L\d")
 
 AXIS_NAME = re.compile(r"^(?![TQ] )[A-Z] ")
 """``[B 1 layer]``, ``[C 8 heads]``, ``[K lr 3e-4]``, ...: the alternatives
-``run_modules`` sweeps. Any capital letter and a space -- except ``T`` (transfer)
-and ``Q`` (diagnostic controls), so those sections never count as axis points."""
-
-TRANSFER_NAME = re.compile(r"^T ")
-"""``[T frozen text]``, ``[T finetuned]``, ...: what ``run_transfer`` walks."""
+``run_modules`` sweeps. Any capital letter and a space -- except ``T`` (the withdrawn
+transfer runs) and ``Q`` (diagnostic controls), so neither counts as an axis point."""
 
 
 class ParameterError(ValueError):
@@ -69,27 +64,6 @@ class Training:
     max_text_tokens: int = 64
     seed: int = 1337
     regularisation: float = 1.0
-
-
-@dataclass(frozen=True)
-class Transfer:
-    """The pretrained side: one checkpoint, and the budget the fine-tune is given.
-
-    ``all-MiniLM-L6-v2`` is the smallest sentence encoder that is still a real one:
-    6 layers, 22M parameters, 384 dimensions. Frozen, it costs one pass over the ten
-    thousand rows; fine-tuned, it costs a training run per epoch, which is why
-    ``finetune_folds`` is 1. Reporting one fold and saying so is honest; reporting
-    one fold as if it were five is not.
-    """
-
-    checkpoint: str = "sentence-transformers/all-MiniLM-L6-v2"
-    max_length: int = 96
-    epochs: int = 3
-    batch_size: int = 32
-    learning_rate: float = 2e-5
-    weight_decay: float = 0.01
-    finetune_folds: int = 1
-    seed: int = 1337
 
 
 @dataclass(frozen=True)
@@ -108,7 +82,6 @@ class Protocol:
 
 
 TRAINING = Training()
-TRANSFER = Transfer()
 PROTOCOL = Protocol()
 
 
@@ -167,10 +140,6 @@ class RunConfig:
         JSON record for display, but never enters the hash. An override probe and a
         declared section that resolve to the same configuration therefore share one
         record instead of training it twice.
-
-        ``TRANSFER`` enters only for the two pretrained regimes: changing the
-        fine-tuning budget should not invalidate a Transformer trained from scratch,
-        which never read it.
         """
         config_fields = asdict(self)
         del config_fields["name"]
@@ -211,8 +180,6 @@ class RunConfig:
                 PROTOCOL.random_state,
             ),
         ]
-        if self.model in PRETRAINED:
-            payload.append(sorted(asdict(TRANSFER).items()))
         return hashlib.sha256(repr(tuple(payload)).encode()).hexdigest()[:12]
 
 
@@ -239,10 +206,6 @@ def ladder_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
 
 def axis_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
     return {name: run for name, run in runs.items() if AXIS_NAME.match(name)}
-
-
-def transfer_runs(runs: dict[str, RunConfig]) -> dict[str, RunConfig]:
-    return {name: run for name, run in runs.items() if TRANSFER_NAME.match(name)}
 
 
 def apply_overrides(config: RunConfig, assignments: list[str]) -> RunConfig:

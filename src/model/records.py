@@ -1,10 +1,9 @@
 """What one fold produced, in a shape every model can fill.
 
-The logistic bar, the Transformer, the frozen encoder and the fine-tuned checkpoint
-are four very different objects, but the results table asks all four the same three
-questions: how many parameters were trained, how the loss moved epoch by epoch, and
-which epoch was kept. A model that has no epochs answers with an empty curve rather
-than with a gap in the table.
+The logistic bar and the Transformer are very different objects, but the results
+table asks both the same three questions: how many parameters were trained, how the
+loss moved epoch by epoch, and which epoch was kept. A model that has no epochs
+answers with an empty curve rather than with a gap in the table.
 
 This lives apart from ``training`` so that ``baseline`` can fill one too without the
 two modules importing each other.

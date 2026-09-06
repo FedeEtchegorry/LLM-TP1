@@ -86,7 +86,6 @@ class QuantileBuckets:
 class WordIndicators:
     """A binary bag of words over the declared text fields, fitted on training rows.
 
-    This is the counterweight to the frozen sentence encoder of ``pretrained.py``.
     It has no idea that *customer* and *shopper* mean nearly the same thing, which is
     exactly why it separates ``(Customer Favorite)`` from ``(Shopper Favorite)`` that
     a semantic embedding folds together. A word absent from the training rows gets no
@@ -123,11 +122,7 @@ def feature_blocks(
     numeric_fields: tuple[str, ...] = (NUMERIC_FIELD,),
     n_buckets: int = N_BUCKETS,
 ) -> list:
-    """The declared columns as fit/transform blocks, in a fixed order.
-
-    ``pretrained.py`` builds the same list to hang its embedding block beside, so the
-    tabular half of a transfer run is identical to the tabular half of the bar.
-    """
+    """The declared columns as fit/transform blocks, in a fixed order."""
     blocks: list = []
     if text_fields:
         blocks.append(WordIndicators(text_fields))

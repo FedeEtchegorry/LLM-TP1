@@ -72,12 +72,6 @@ Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
 **Se corren una vez.** Enfrentan dos modelos congelados antes de abrir el holdout, y
 escriben `final/comparison.json` y `final/ceiling.json`.
 
-### Transfer learning
-
-```bash
-.venv/bin/python -m scripts.run_transfer --parameters parameters-v1-modules.txt
-```
-
 ### Figuras
 
 ```bash

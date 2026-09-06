@@ -7,19 +7,17 @@ apart in how they train or in what they store.
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 
 import numpy as np
 import pandas as pd
 
 from src.model.baseline import logistic_scorer, target_of
 from src.model.configs import (
-    FINETUNE,
-    FROZEN,
     LOGISTIC,
+    PRETRAINED,
     PROTOCOL,
     TRAINING,
-    TRANSFER,
     TRANSFORMER,
     RunConfig,
 )
@@ -69,27 +67,13 @@ def describe(frame: pd.DataFrame, partitions: DataPartitions) -> None:
         )
 
 
-def folds_for(config: RunConfig, partitions: DataPartitions) -> DataPartitions:
-    """The folds this run reports into.
-
-    Every regime gets the same five, with one stated exception: fine-tuning a 22M
-    parameter checkpoint is a training run per epoch, so it reports fold 0 only. The
-    restriction lives here, once, rather than in the entrypoint, so a fine-tune
-    launched from anywhere gets the same budget -- and so the stored record, which
-    carries its folds, always says how many it actually ran.
-    """
-    if config.model != FINETUNE:
-        return partitions
-    return replace(partitions, folds=partitions.folds[: TRANSFER.finetune_folds])
-
-
 def scorer_for(
     config: RunConfig,
     frame: pd.DataFrame,
     trained: list[TrainedFold],
     members: list | None = None,
 ) -> ScoreFold:
-    """The one place a model name becomes a model. Four regimes, one signature."""
+    """The one place a model name becomes a model."""
     if config.model == LOGISTIC:
         return logistic_scorer(
             frame,
@@ -100,21 +84,12 @@ def scorer_for(
             c=TRAINING.regularisation,
             folds=trained,
         )
-    if config.model == FROZEN:
-        from src.model.pretrained import embeddings_for, frozen_scorer
-
-        return frozen_scorer(
-            config,
-            frame,
-            embeddings_for(frame, config.text_fields),
-            n_buckets=TRAINING.n_buckets,
-            c=TRAINING.regularisation,
-            folds=trained,
+    if config.model in PRETRAINED:
+        raise NotImplementedError(
+            f"[{config.name}] declares model={config.model}, a transfer-learning "
+            "regime whose implementation was withdrawn; the frozen parameter files "
+            "still declare it, so they keep loading, but no run can be launched"
         )
-    if config.model == FINETUNE:
-        from src.model.finetuning import finetune_scorer
-
-        return finetune_scorer(config, frame, folds=trained)
     return transformer_scorer(config, frame, folds=trained, members=members)
 
 
@@ -135,15 +110,14 @@ def run_one(
     trained: list[TrainedFold] = []
     predicted: list[np.ndarray] = []
     members: list = []
-    folds = folds_for(config, partitions)
     started = time.perf_counter()
     result = evaluate_across_folds(
         config.name,
         target_of(frame),
-        folds,
+        partitions,
         _reporting(
             _capturing(scorer_for(config, frame, trained, members), predicted),
-            len(folds.folds),
+            len(partitions.folds),
             started,
         ),
     )
@@ -167,13 +141,12 @@ def run_one(
         config,
         {
             fold.fold_index: (fold.validation_indices, predicted[position])
-            for position, fold in enumerate(folds.folds)
+            for position, fold in enumerate(partitions.folds)
         },
         directory=directory,
     )
-    # Only our own model's weights are kept. The linear regimes have nothing worth
-    # storing, and the fine-tuned checkpoint is 22M parameters that the same recipe
-    # reproduces -- ``run_final`` reads attention out of the Transformer alone.
+    # The linear bar has nothing worth storing, and ``run_final`` reads attention
+    # out of the Transformer alone.
     if PROTOCOL.save_weights and config.model == TRANSFORMER:
         for fold_index, fold in enumerate(trained):
             save_weights(config, fold_index, fold.model.state_dict(), directory=directory)
