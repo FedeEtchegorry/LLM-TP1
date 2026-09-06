@@ -57,11 +57,13 @@ from src.model.diagnostics import (
     calibration_error,
     cls_attention,
     errors_by_level,
+    pooling_by_group,
     price_bucket_recovery,
     pr_points,
     ranking_gains,
     roc_points,
     tower_norms,
+    truncation,
 )
 from src.model.experiment import FINAL_DIR, describe, partition, run_test
 from src.model.figures import FIGURES_DIR
@@ -319,6 +321,20 @@ def interpretability(
         )
         print(f"figure: {path}")
 
+    print("\n=== HOW MUCH TEXT DID THE DECLARED BUDGET CUT? ===")
+    cut = truncation(encoder, frame, explained.read_on)
+    if cut.empty:
+        print(f"  {config.name} reads no text field: nothing to truncate")
+    else:
+        print(
+            cut.assign(
+                tokens_mean=lambda d: d["tokens_mean"].map("{:.1f}".format),
+                rows_truncated=lambda d: (d["rows_truncated"] * 100).map(
+                    "{:.1f}%".format
+                ),
+            ).to_string(index=False)
+        )
+
     print("\n=== WHERE [CLS] LOOKS ===")
     attention = cls_attention(model, encoder, frame, explained.read_on)
     if attention.empty:
@@ -338,6 +354,16 @@ def interpretability(
         )
         print(f"figure: {path}")
 
+    print("\n=== WHAT THE ROW SUMMARY IS MADE OF ===")
+    pooled = pooling_by_group(model, encoder, frame, explained.read_on)
+    print(
+        pooled.assign(
+            tokens=lambda d: d["tokens"].map("{:.1f}".format),
+            mass=lambda d: d["mass"].map("{:.4f}".format),
+            per_token=lambda d: d["per_token"].map("{:.4f}".format),
+        ).sort_values("mass", ascending=False).to_string(index=False)
+    )
+
     print("\n=== HOW LOUDLY DOES EACH TOWER SPEAK? ===")
     norms = tower_norms(model, encoder, frame, explained.read_on)
     print(norms.to_string(index=False, float_format="{:.3f}".format))
@@ -349,9 +375,7 @@ def interpretability(
         return
 
     print("\n=== DID THE PRICE BUCKETS RECOVER THE INVERTED U? ===")
-    sweep = price_bucket_recovery(
-        model, encoder, frame, explained.read_on, column=PRICE_COLUMN
-    )
+    sweep = price_bucket_recovery(model, encoder, frame, explained.read_on)
     display = sweep.assign(
         observed=lambda d: (d["observed"] * 100).map("{:.1f}%".format),
         counterfactual=lambda d: (d["counterfactual"] * 100).map("{:.1f}%".format),

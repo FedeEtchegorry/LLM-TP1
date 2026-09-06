@@ -137,6 +137,7 @@ class RunConfig:
 
     positional: str = "learned"
     embedding_norm: bool = True
+    pooler_projection: bool = True
     tokenizer: str = "wordpiece"
     keep_brackets: bool = True
     tab_tower: str = "mlp"
@@ -322,6 +323,7 @@ def _run(name: str, section) -> RunConfig:
             numeric_embedding=section.get("numeric_embedding"),
             positional=section.get("positional", fallback="learned"),
             embedding_norm=section.getboolean("embedding_norm", fallback=True),
+            pooler_projection=section.getboolean("pooler_projection", fallback=True),
             tokenizer=section.get("tokenizer", fallback="wordpiece"),
             keep_brackets=section.getboolean("keep_brackets", fallback=True),
             tab_tower=section.get("tab_tower", fallback="mlp"),

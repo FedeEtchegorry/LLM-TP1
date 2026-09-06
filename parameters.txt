@@ -26,6 +26,7 @@ keep_brackets      = true
 positional         = learned
 embedding_norm     = true
 pooling            = cls
+pooler_projection  = true
 
 # Torre tabular y fusion. x_tab tiene 30 columnas y su ancho no es configurable;
 

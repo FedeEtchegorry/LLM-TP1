@@ -30,29 +30,41 @@ def _init_weights(module: nn.Module) -> None:
                 module.weight[module.padding_idx].zero_()
 
 
-class FirstTokenPooling(nn.Module):
+class WeightedPooling(nn.Module):
+
+    def weights(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        # position 0 is never padding, so ``mask`` goes unread here
-        return x[:, 0]
+        weights = self.weights(x, mask)
+        return (weights.unsqueeze(-1) * x).sum(dim=1)
 
 
-class MeanPooling(nn.Module):
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        weights = mask.unsqueeze(-1).to(dtype=x.dtype)
-        return (x * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+class FirstTokenPooling(WeightedPooling):
+    def weights(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        # Position 0 is [CLS] and is never padding. 
+        weights = x.new_zeros(mask.shape)
+        weights[:, 0] = 1.0
+        return weights
 
 
-class AttentionPooling(nn.Module):
+class MeanPooling(WeightedPooling):
+    def weights(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        weights = mask.to(dtype=x.dtype)
+        return weights / weights.sum(dim=-1, keepdim=True).clamp_min(1.0)
+
+
+class AttentionPooling(WeightedPooling):
     """A query that is a parameter, not derived from the sequence."""
 
     def __init__(self, d_model: int) -> None:
         super().__init__()
         self.query = nn.Parameter(torch.randn(d_model) * INIT_STD)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def weights(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         scores = (x @ self.query) * x.shape[-1] ** -0.5
         scores = scores.masked_fill(~mask, float("-inf"))
-        return (torch.softmax(scores, dim=-1).unsqueeze(-1) * x).sum(dim=1)
+        return torch.softmax(scores, dim=-1).masked_fill(~mask, 0.0)
 
 
 def _stack(
@@ -128,6 +140,11 @@ class TextTower(nn.Module):
             for _ in range(config.n_layers)
         )
         self.pooler = self._pooler(config.pooling, d_model)
+        self.projection = (
+            nn.Sequential(nn.Linear(d_model, d_model), nn.Tanh())
+            if getattr(config, "pooler_projection", True)
+            else nn.Identity()
+        )
         self.apply(_init_weights)
 
     @staticmethod
@@ -157,11 +174,27 @@ class TextTower(nn.Module):
             x = x + self.positions(x)
         return self.embedding_dropout(self.embedding_norm(x)), mask
 
-    def forward(self, batch: TextBatch) -> torch.Tensor:
+    def _contextualize(self, batch: TextBatch) -> tuple[torch.Tensor, torch.Tensor]:
         x, mask = self.embed(batch)
         for block in self.blocks:
             x = block(x, mask)
-        return self.pooler(x, mask)
+        return x, mask
+
+    def forward_with_pooling_weights(
+        self, batch: TextBatch
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x, mask = self._contextualize(batch)
+        weights = self.pooler.weights(x, mask)
+        pooled = (weights.unsqueeze(-1) * x).sum(dim=1)
+        return self.projection(pooled), weights
+
+    def pooling_weights(self, batch: TextBatch) -> torch.Tensor:
+        x, mask = self._contextualize(batch)
+        return self.pooler.weights(x, mask)
+
+    def forward(self, batch: TextBatch) -> torch.Tensor:
+        pooled, _ = self.forward_with_pooling_weights(batch)
+        return pooled
 
     def attention_of_cls(self, batch: TextBatch) -> torch.Tensor:
         """Attention from ``[CLS]``: ``(rows, layers, heads, positions)``."""

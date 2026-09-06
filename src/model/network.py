@@ -46,6 +46,10 @@ class BtrTransformer(nn.Module):
         text_batch, _ = batch
         return self.text_tower.attention_of_cls(text_batch)
 
+    def pooling_weights(self, batch: TowerBatch) -> torch.Tensor:
+        text_batch, _ = batch
+        return self.text_tower.pooling_weights(text_batch)
+
 
 def count_parameters(model: nn.Module) -> int:
     return sum(
