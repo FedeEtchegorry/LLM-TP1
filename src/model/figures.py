@@ -20,6 +20,7 @@ from src.model.style import (  # sets the Agg backend before pyplot is imported 
 from src.model.style import save as _save
 
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.colors import Normalize  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -249,6 +250,101 @@ def attention_by_group(table: pd.DataFrame, *, title: str, path: Path) -> Path:
         axes.set_title(panel)
         axes.grid(alpha=0.25, axis="x")
         axes.legend(loc="lower right", fontsize=8)
+
+    figure.suptitle(title)
+    figure.tight_layout()
+    return _save(figure, path)
+
+
+TOKENS_PER_LINE = 8
+def _shade(axes, words: list[str], multiples: np.ndarray, paint) -> None:
+    for order, (word, multiple) in enumerate(zip(words, multiples)):
+        column, line = order % TOKENS_PER_LINE, order // TOKENS_PER_LINE
+        axes.add_patch(
+            plt.Rectangle((column, -line), 0.92, 0.7, facecolor=paint.to_rgba(multiple),
+                          edgecolor="#52514e", linewidth=0.6)
+        )
+        axes.text(
+            column + 0.46, -line + 0.35, word,
+            ha="center", va="center", fontsize=9 if len(word) <= 7 else 6.5,
+            color="white" if paint.norm(multiple) > 0.6 else "#231f20",
+        )
+
+
+def attention_against_uniform(
+    groups: pd.DataFrame,
+    tokens: pd.DataFrame,
+    *,
+    row: object,
+    title: str,
+    path: Path,
+) -> Path:
+
+    from src.model.diagnostics import (
+        CLOSING_GROUP,
+        CLS_GROUP,
+        PADDING_GROUP,
+        PHRASE_GROUP,
+        SEP_GROUP,
+    )
+
+    figure, (left, right) = plt.subplots(
+        1, 2, figsize=(13, 5.5), gridspec_kw={"width_ratios": [1.25, 1]}
+    )
+
+    last = groups[groups["layer"] == groups["layer"].max()]
+    last = last.sort_values("multiple", ascending=False).reset_index(drop=True)
+    positions = np.arange(len(last))
+    left.bar(
+        positions, last["mass"] * 100, width=0.62, zorder=3,
+        # Both copies of the tier the generator writes, highlighted together.
+        color=[HIGHLIGHT if name in (PHRASE_GROUP, CLOSING_GROUP) else BAR_COLOR
+               for name in last["group"]],
+    )
+    left.hlines(
+        last["share"] * 100, positions - 0.34, positions + 0.34,
+        color=NEUTRAL, linewidth=2, zorder=4, label="base uniforme (% de tokens)",
+    )
+    for position, bar in last.iterrows():
+        left.text(
+            position, bar["mass"] * 100 + 1.2, f"x{bar['multiple']:.1f}",
+            ha="center", va="bottom", fontsize=8, color="#52514e",
+        )
+
+    left.set_xticks(positions)
+    left.set_xticklabels(last["group"], rotation=30, ha="right", fontsize=8)
+    left.set_ylabel("% de la masa de atencion del [CLS]")
+    left.set_title("Cuanta atencion se lleva cada grupo")
+    left.grid(alpha=0.25, axis="y")
+    left.legend(loc="best", fontsize=8)
+    _framed(left)
+
+    example = tokens[
+        (tokens["row"] == row) & (tokens["layer"] == tokens["layer"].max())
+    ]
+    real = example[example["group"] != PADDING_GROUP]
+    # The whole text, not just the title: the tier is written twice and the model reads
+    # the copy that closes the description.
+    structural = real["group"].str.startswith(SEP_GROUP) | (real["group"] == CLS_GROUP)
+    words = real[~structural].sort_values("position")
+
+    # Both panels in the same currency: one token's share of a sequence this long.
+    multiples = (words["mass"] * len(real)).to_numpy()
+    paint = plt.cm.ScalarMappable(
+        norm=Normalize(vmin=0.0, vmax=max(2.0, float(multiples.max(initial=0.0)))),
+        cmap=plt.get_cmap("Oranges"),
+    )
+    _shade(right, words["token"].tolist(), multiples, paint)
+
+    lines = -(-len(words) // TOKENS_PER_LINE)
+    right.set_xlim(-0.1, TOKENS_PER_LINE)
+    right.set_ylim(-lines + 0.85, 0.9)
+    right.set_axis_off()
+    right.set_title(f"El texto de una fila real (fila {row}), token por token")
+    figure.colorbar(
+        paint, ax=right, fraction=0.05,
+        label="veces la base uniforme del token",
+    )
 
     figure.suptitle(title)
     figure.tight_layout()

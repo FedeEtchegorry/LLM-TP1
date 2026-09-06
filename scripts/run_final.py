@@ -55,8 +55,11 @@ from src.model.diagnostics import (
     calibration,
     calibration_error,
     cls_attention,
+    median_phrase_row,
     errors_by_level,
     pooling_by_group,
+    token_attention,
+    uniform_multiple,
     price_bucket_recovery,
     pr_points,
     ranking_gains,
@@ -294,7 +297,11 @@ def interpretability(
     explained: Explained, frame: pd.DataFrame, figures: Path
 ) -> None:
     """The two questions only the trained Transformer can answer."""
-    from src.model.figures import attention_by_group, price_recovery
+    from src.model.figures import (
+        attention_against_uniform,
+        attention_by_group,
+        price_recovery,
+    )
 
     from src.model.figures import training_curves
 
@@ -350,6 +357,27 @@ def interpretability(
             attention,
             title=f"Atencion del [CLS] por grupo de posiciones ({label})",
             path=figures / "09-final-atencion-cls.png",
+        )
+        print(f"figure: {path}")
+
+        against = uniform_multiple(attention)
+        print(
+            against.assign(
+                layer=lambda d: d["layer"] + 1,
+                share=lambda d: (d["share"] * 100).map("{:.1f}%".format),
+                mass=lambda d: (d["mass"] * 100).map("{:.1f}%".format),
+                multiple=lambda d: d["multiple"].map("x{:.2f}".format),
+            )[["layer", "group", "share", "mass", "multiple"]]
+            .sort_values(["layer", "multiple"], ascending=[True, False])
+            .to_string(index=False)
+        )
+        by_token = token_attention(model, encoder, frame, explained.read_on)
+        path = attention_against_uniform(
+            against,
+            by_token,
+            row=median_phrase_row(by_token),
+            title=f"Atencion del [CLS] contra la base uniforme ({label})",
+            path=figures / "09-final-atencion-contra-uniforme.png",
         )
         print(f"figure: {path}")
 

@@ -18,6 +18,7 @@ from sklearn.metrics import (
 
 from src.eda.loading import NO_PHRASE
 from src.model.encoding import text_or_empty
+from src.model.tokenization import CLS, PAD, SEP, SPECIAL_TOKENS
 
 Z_95 = 1.959963984540054
 
@@ -165,11 +166,14 @@ def errors_by_level(
 
 PHRASE_GROUP = "frase de popularidad"
 TITLE_REST = "titulo (resto)"
+CLOSING_GROUP = "cierre de la descripcion"
+DESCRIPTION_REST = "descripcion (resto)"
 CLS_GROUP = "[CLS]"
 SEP_GROUP = "[SEP]"
 PADDING_GROUP = "(padding)"
 TABULAR_PRICE = "price_position"
 ATTENTION_COLUMNS = ["layer", "group", "tokens", "mass", "per_token"]
+TOKEN_COLUMNS = ["row", "layer", "position", "token", "group", "mass"]
 
 
 def _phrase_tokens(encoder, row) -> int:
@@ -180,22 +184,57 @@ def _phrase_tokens(encoder, row) -> int:
     return len(encoder.encode(title)) - len(encoder.encode(title[: title.rindex("(")]))
 
 
+def _closing_tokens(encoder, row) -> int:
+    description = text_or_empty(getattr(row, "description", ""))
+    closing = text_or_empty(getattr(row, "description_closing", ""))
+    if not closing or closing not in description:
+        return 0
+    return len(encoder.encode(description)) - len(
+        encoder.encode(description[: description.rindex(closing)])
+    )
+
+
+_TAILS = {
+    "title": (_phrase_tokens, PHRASE_GROUP, TITLE_REST),
+    "description": (_closing_tokens, CLOSING_GROUP, DESCRIPTION_REST),
+}
+
+
 def position_groups(encoder, frame: pd.DataFrame, indices) -> list[list[str]]:
-    """One name per position: the phrase closes the title, before the first ``[SEP]``."""
+    """One name per position: each field's tail names itself, before its ``[SEP]``."""
     rows = frame.iloc[list(indices)]
     named: list[list[str]] = []
     for row, spans in zip(rows.itertuples(index=False), encoder.layout(rows)):
         labels = [CLS_GROUP]
         for span in spans:
             field = [span.name] * span.kept
-            if span.name == "title":
-                phrase = min(_phrase_tokens(encoder, row), span.kept)
-                field[span.kept - phrase :] = [PHRASE_GROUP] * phrase
-                field[: span.kept - phrase] = [TITLE_REST] * (span.kept - phrase)
-            labels.extend([*field, SEP_GROUP])
+            if span.name in _TAILS:
+                count, tail_name, rest_name = _TAILS[span.name]
+                tail = min(count(encoder, row), span.kept)
+                field[span.kept - tail :] = [tail_name] * tail
+                field[: span.kept - tail] = [rest_name] * (span.kept - tail)
+            labels.extend([*field, f"{SEP_GROUP} {span.name}"])
         labels.extend([PADDING_GROUP] * (encoder.sequence_length - len(labels)))
         named.append(labels)
     return named
+
+
+def position_tokens(encoder, frame: pd.DataFrame, indices) -> list[list[str]]:
+    rows = frame.iloc[list(indices)]
+    written: list[list[str]] = []
+    for row, spans in zip(rows.itertuples(index=False), encoder.layout(rows)):
+        words = [SPECIAL_TOKENS[CLS]]
+        for span in spans:
+            words.extend(encoder.tokens(getattr(row, span.name))[: span.kept])
+            words.append(SPECIAL_TOKENS[SEP])
+        words.extend([SPECIAL_TOKENS[PAD]] * (encoder.sequence_length - len(words)))
+        written.append(words)
+    return written
+
+
+def uniform_multiple(table: pd.DataFrame) -> pd.DataFrame:
+    share = table["tokens"] / table.groupby("layer")["tokens"].transform("sum")
+    return table.assign(share=share, multiple=table["mass"] / share)
 
 
 def _batches(model, encoder, frame: pd.DataFrame, indices):
@@ -262,6 +301,50 @@ def cls_attention(model, encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
         ["layer"],
         n_rows,
     )
+
+
+def token_attention(model, encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
+    import torch
+
+    chunks = []
+    with torch.no_grad():
+        for batch in _batches(model, encoder, frame, indices):
+            weights = model.attention_of_cls(batch)
+            if weights.numel() == 0:
+                return pd.DataFrame(columns=TOKEN_COLUMNS)
+            chunks.append(weights.mean(dim=2).cpu().numpy())
+
+    attention = np.concatenate(chunks)
+    n_rows, n_layers, n_positions = attention.shape
+    groups = _named_positions(encoder, frame, indices, (n_rows, n_positions))
+    words = np.array(position_tokens(encoder, frame, indices))
+
+    def spread(values: np.ndarray) -> np.ndarray:
+        return np.repeat(values[:, None, :], n_layers, axis=1).reshape(-1)
+
+    return pd.DataFrame(
+        {
+            "row": np.repeat(frame.iloc[list(indices)].index, n_layers * n_positions),
+            "layer": np.tile(np.repeat(np.arange(n_layers), n_positions), n_rows),
+            "position": np.tile(np.arange(n_positions), n_rows * n_layers),
+            "token": spread(words),
+            "group": spread(groups),
+            "mass": attention.reshape(-1),
+        }
+    )
+
+
+def median_phrase_row(tokens: pd.DataFrame) -> object:
+    last = tokens[tokens["layer"] == tokens["layer"].max()]
+    phrase = (
+        last[last["group"] == PHRASE_GROUP]
+        .groupby("row")["mass"]
+        .sum()
+        .sort_values(kind="stable")
+    )
+    if phrase.empty:
+        return tokens["row"].iloc[0]
+    return phrase.index[len(phrase) // 2]
 
 
 def pooling_by_group(model, encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
