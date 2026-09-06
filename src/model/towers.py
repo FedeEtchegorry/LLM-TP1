@@ -136,7 +136,7 @@ class TextTower(nn.Module):
         self.embedding_dropout = nn.Dropout(config.dropout)
 
         self.blocks = nn.ModuleList(
-            Block(d_model, config.n_heads, config.dropout)
+            Block(d_model, config.n_heads, config.dropout, config.ffn_multiplier)
             for _ in range(config.n_layers)
         )
         self.pooler = self._pooler(config.pooling, d_model)

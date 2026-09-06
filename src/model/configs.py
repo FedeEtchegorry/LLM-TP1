@@ -102,6 +102,7 @@ class RunConfig:
     dropout: float
     pooling: str
 
+    ffn_multiplier: int = 4
     positional: str = "learned"
     embedding_norm: bool = True
     pooler_projection: bool = True
@@ -275,6 +276,7 @@ def _run(name: str, section) -> RunConfig:
             n_heads=section.getint("n_heads"),
             dropout=section.getfloat("dropout"),
             pooling=section.get("pooling"),
+            ffn_multiplier=section.getint("ffn_multiplier", fallback=4),
             positional=section.get("positional", fallback="learned"),
             embedding_norm=section.getboolean("embedding_norm", fallback=True),
             pooler_projection=section.getboolean("pooler_projection", fallback=True),
@@ -336,6 +338,10 @@ def _validate(config: RunConfig) -> None:
     if config.tabular_dim < 1:
         raise ParameterError(
             f"[{name}] tabular_dim={config.tabular_dim} must be at least 1"
+        )
+    if config.ffn_multiplier < 1:
+        raise ParameterError(
+            f"[{name}] ffn_multiplier={config.ffn_multiplier} must be at least 1"
         )
     if config.d_model % config.n_heads:
         raise ParameterError(

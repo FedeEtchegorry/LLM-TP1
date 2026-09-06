@@ -92,14 +92,19 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedFoward(nn.Module):
-    """The position-wise MLP: out to four times ``n_embd`` and back."""
+    """The position-wise MLP: out to ``multiplier`` times ``n_embd`` and back.
 
-    def __init__(self, n_embd: int, dropout: float) -> None:
+    Four is BERT's proportion, and the width is where most of a block's parameters
+    live, so the multiplier moves with ``n_embd`` instead of being an absolute size.
+    """
+
+    def __init__(self, n_embd: int, dropout: float, multiplier: int = 4) -> None:
         super().__init__()
+        hidden = multiplier * n_embd
         self.net = nn.Sequential(
-            nn.Linear(n_embd, 4 * n_embd),
+            nn.Linear(n_embd, hidden),
             nn.GELU(),
-            nn.Linear(4 * n_embd, n_embd),
+            nn.Linear(hidden, n_embd),
             nn.Dropout(dropout),
         )
 
@@ -111,13 +116,13 @@ class Block(nn.Module):
     """Post-LN block: sublayer, residual sum, then normalization."""
 
     def __init__(
-        self, n_embd: int, n_head: int, dropout: float
+        self, n_embd: int, n_head: int, dropout: float, ffn_multiplier: int = 4
     ) -> None:
         super().__init__()
         if n_embd % n_head:
             raise ValueError(f"n_embd={n_embd} is not divisible by n_head={n_head}")
         self.sa = MultiHeadAttention(n_head, n_embd // n_head, n_embd, dropout)
-        self.ffwd = FeedFoward(n_embd, dropout)
+        self.ffwd = FeedFoward(n_embd, dropout, ffn_multiplier)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 

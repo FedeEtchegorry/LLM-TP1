@@ -20,6 +20,7 @@ numeric_fields     = price_position
 d_model            = 64
 n_layers           = 1
 n_heads            = 4
+ffn_multiplier     = 4
 dropout            = 0.1
 tokenizer          = wordpiece
 keep_brackets      = true
