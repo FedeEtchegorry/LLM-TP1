@@ -2,9 +2,9 @@
 A/B/C (no "Modelo" prefix -- the charts already make clear these are models), and
 every architecture-search variant becomes "C (campo=valor, ...)" instead of its
 axis-letter codename (``B depth 2``, ``D d_model 96``, ``V neighbour n_heads 8``,
-...). This only parses the predictable name patterns run_architecture.py and
-run_greedy_validation.py generate -- it never touches the underlying run names,
-digests or caching, purely how charts label things.
+...). This only parses the predictable name patterns the first submission's
+architecture search left in its stored records -- it never touches the underlying
+run names, digests or caching, purely how charts label things.
 
     A  = el lineal sobre el texto crudo (la referencia).
     A* = la cota: sin texto crudo, con la frase del título extraída a mano.
@@ -34,7 +34,6 @@ BASE_ALIAS = {
 }
 
 FIELD_LABEL = {
-    "numeric_embedding": "embedding numérico",
     "n_layers": "profundidad",
     "d_model": "ancho",
     "n_heads": "heads",
@@ -44,7 +43,6 @@ FIELD_LABEL = {
 }
 
 _PATTERNS: list[tuple[re.Pattern, Callable[[re.Match], list[tuple[str, str]]]]] = [
-    (re.compile(r"^A numeric (\w+)$"), lambda m: [("numeric_embedding", m.group(1))]),
     (re.compile(r"^B depth (\d+)$"), lambda m: [("n_layers", m.group(1))]),
     (re.compile(r"^D d_model (\d+)$"), lambda m: [("d_model", m.group(1))]),
     (re.compile(r"^C (\d+) heads$"), lambda m: [("n_heads", m.group(1))]),

@@ -1,8 +1,7 @@
 """What varies between runs lives in the parameters file; what does not lives here.
 
 The file carries only the knobs an experiment actually turns -- the fields
-that enter, the shape of the encoder, and how numbers are embedded. Everything else is
-a constant below.
+that enter and the shape of the two towers. Everything else is a constant below.
 
 Those constants still reach every run's digest, so editing one here invalidates the
 cached results it would have changed. A constant that stops being constant moves up
@@ -25,6 +24,10 @@ V1_PARAMETERS = Path("parameters-v1.txt")
 V1_MODULES = Path("parameters-v1-modules.txt")
 """Frozen: what the first submission declared, under the two names it used."""
 
+LEGACY_KEYS = frozenset({"numeric_embedding"})
+"""Keys the frozen files still declare and no run reads. Ignored rather than
+rejected, so those files stay the record of what the first submission swept."""
+
 LOGISTIC = "logistic"
 TRANSFORMER = "transformer"
 FROZEN = "frozen"
@@ -35,14 +38,6 @@ MODELS = (LOGISTIC, TRANSFORMER, FROZEN, FINETUNE)
 PRETRAINED = (FROZEN, FINETUNE)
 """The two that start from somebody else's weights instead of from noise."""
 
-NUMERIC_EMBEDDINGS = (
-    "none",
-    "affine",
-    "buckets",
-    "affine+buckets",
-    "piecewise",
-    "periodic",
-)
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
 
@@ -133,7 +128,6 @@ class RunConfig:
     n_heads: int
     dropout: float
     pooling: str
-    numeric_embedding: str
 
     positional: str = "learned"
     embedding_norm: bool = True
@@ -170,11 +164,9 @@ class RunConfig:
 
         Two sections with different names but byte-identical parameters are the same
         experiment and must land on the same cache file: ``name`` is stored inside the
-        JSON record for display, but never enters the hash. This is what lets
-        ``run_architecture``'s candidates and ``run_greedy_validation``'s probes reuse
-        each other's cache when they resolve to the same underlying configuration --
-        the whole point of ``run_greedy_validation`` costing zero retrains when the
-        greedy walk never moved off its base.
+        JSON record for display, but never enters the hash. An override probe and a
+        declared section that resolve to the same configuration therefore share one
+        record instead of training it twice.
 
         ``TRANSFER`` enters only for the two pretrained regimes: changing the
         fine-tuning budget should not invalidate a Transformer trained from scratch,
@@ -301,7 +293,7 @@ def _coerced(key: str, annotation: str, value: str):
 
 def _run(name: str, section) -> RunConfig:
     known = {field.name for field in fields(RunConfig)} - {"name"}
-    unknown = set(section.keys()) - known
+    unknown = set(section.keys()) - known - LEGACY_KEYS
     if unknown:
         raise ParameterError(
             f"[{name}] sets unknown keys: {sorted(unknown)}. "
@@ -320,7 +312,6 @@ def _run(name: str, section) -> RunConfig:
             n_heads=section.getint("n_heads"),
             dropout=section.getfloat("dropout"),
             pooling=section.get("pooling"),
-            numeric_embedding=section.get("numeric_embedding"),
             positional=section.get("positional", fallback="learned"),
             embedding_norm=section.getboolean("embedding_norm", fallback=True),
             pooler_projection=section.getboolean("pooler_projection", fallback=True),
@@ -371,7 +362,6 @@ def _validate(config: RunConfig) -> None:
     if config.model != TRANSFORMER:
         return
     for value, allowed, label in (
-        (config.numeric_embedding, NUMERIC_EMBEDDINGS, "numeric_embedding"),
         (config.positional, POSITIONAL_ENCODINGS, "positional"),
         (config.pooling, POOLINGS, "pooling"),
         (config.tokenizer, TOKENIZERS, "tokenizer"),

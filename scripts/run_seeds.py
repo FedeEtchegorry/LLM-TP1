@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     frame = load_dataset(PROTOCOL.dataset)
     partitions = partition(frame)
     print(f"{config.name}: n_layers={config.n_layers} d{config.d_model} "
-          f"{config.numeric_embedding} lr{config.learning_rate:g}")
+          f"lr{config.learning_rate:g}")
 
     runs = []
     for seed in SEEDS:

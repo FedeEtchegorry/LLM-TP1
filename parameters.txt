@@ -28,14 +28,13 @@ embedding_norm     = true
 pooling            = cls
 pooler_projection  = true
 
-# Torre tabular y fusion. x_tab tiene 30 columnas y su ancho no es configurable;
+# Torre tabular y fusion. x_tab tiene 30 columnas y su ancho no es configurable.
 
-numeric_embedding  = piecewise
 tab_tower          = mlp
 tabular_dim        = 16
 fusion_head        = mlp
 
-# Protocolo de optimizacion.
+# Protocolo de optimización.
 learning_rate      = 1e-4
 weight_decay       = 0.01
 epochs             = 60

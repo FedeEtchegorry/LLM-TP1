@@ -1192,9 +1192,8 @@ def eda_ladder_waterfall(
 
 # ---------------------------------------------------------------------------
 # Ejercicio 2 (EDA contract): charts 3-5 of the flow. Implemented and unit-tested
-# against synthetic fixtures; not yet exercised against real data, which needs the
-# full architecture search (Task 5), its greedy-order validation (Task 11) and the
-# holdout (Task 7/9) to have actually run. See ``run_eda_contract_figures.py``.
+# against synthetic fixtures; never exercised against real data, because the search
+# that fed them belonged to the first submission and no longer has a runner.
 # ---------------------------------------------------------------------------
 
 

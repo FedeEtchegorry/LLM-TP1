@@ -213,7 +213,7 @@ def render_audit(
         config = document.get("config", {})
         parameters = ", ".join(
             f"{key}={config[key]}"
-            for key in ("model", "d_model", "n_layers", "n_heads", "dropout", "positional", "pooling", "numeric_embedding", "seed")
+            for key in ("model", "d_model", "n_layers", "n_heads", "dropout", "positional", "pooling", "seed")
             if key in config
         )
         best_epochs = [fold.get("best_epoch") for fold in document.get("folds", [])]

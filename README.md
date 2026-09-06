@@ -62,15 +62,6 @@ tres.
 
 Escribe `embeddings/linear-sweep.csv` y `embeddings/selection.json`.
 
-### Búsqueda de arquitectura
-
-```bash
-.venv/bin/python -m scripts.run_bracket_search --results results/v1-una-torre/eda-contract
-.venv/bin/python -m scripts.run_attention_ablation --results results/v1-una-torre/eda-contract
-```
-
-Escriben `architecture/bracket-search.json` y `architecture/attention-ablation.json`.
-
 ### Evaluación final
 
 ```bash
@@ -90,8 +81,6 @@ escriben `final/comparison.json` y `final/ceiling.json`.
 ### Figuras
 
 ```bash
-.venv/bin/python -m scripts.run_eda_contract_figures \
-    --results results/v1-una-torre/eda-contract --figures figures/eda-contract
 .venv/bin/python -m scripts.run_figures \
     --results results/v1-una-torre/eda-contract --figures figures/final-bracket
 ```
