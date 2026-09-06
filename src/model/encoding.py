@@ -275,7 +275,8 @@ class RowEncoder:
 
     @property
     def sequence_length(self) -> int:
-        """Fixed width: ``[CLS]``, the shared budget, and one ``[SEP]`` per field."""
+        if not self.spec.text_fields:
+            return 1
         return 1 + self.spec.max_text_tokens + len(self.spec.text_fields)
 
     @property
