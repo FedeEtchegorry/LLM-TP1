@@ -224,9 +224,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Tests -- run locally, not part of the delivered repo
-tests/
-
 # Generated figures -- regenerate with the run_* scripts
 *.png
 
