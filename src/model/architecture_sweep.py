@@ -47,13 +47,31 @@ class Axis:
         return replace(base, **{self.field: value}, seed=seed)
 
 
-AXES = (
+CAPACITY_AXES = (
     Axis("heads", "n_heads", "Cantidad de heads", (2, 4, 8)),
     Axis("layers", "n_layers", "Encoders apilados", (1, 2, 4)),
     Axis("width", "d_model", "d_model", (64, 96, 128, 256)),
     Axis("ffn", "ffn_multiplier", "Dimensión del FFN (× d_model)", (1, 2, 4)),
     Axis("dropout", "dropout", "Dropout", (0.0, 0.1, 0.3)),
 )
+"""Los cinco de D4: cuánta capacidad tiene el encoder."""
+
+MODULE_AXES = (
+    Axis("pooling", "pooling", "Pooler", ("cls", "mean", "attention")),
+    Axis("positional", "positional", "Positional encoding",
+         ("none", "sinusoidal", "learned")),
+    Axis("embnorm", "embedding_norm", "LayerNorm + Dropout de cierre", (False, True)),
+    Axis("tab", "tab_tower", "Torre tabular", ("linear", "mlp")),
+    Axis("head", "fusion_head", "MLP de salida", ("linear", "mlp")),
+)
+"""Los que cambian qué módulo se usa, no cuánto mide: D8 (pooler), D13 (embedder),
+D6 (torre tabular) y D5 (MLP de salida).
+
+Van en el mismo barrido que los de capacidad porque son la misma pregunta con la misma
+forma --un factor por vez contra la base, pareado por semilla-- y porque así comparten el
+valor base, que se mide una sola vez para los diez ejes en lugar de una por ticket."""
+
+AXES = CAPACITY_AXES + MODULE_AXES
 
 BY_KEY = {axis.key: axis for axis in AXES}
 

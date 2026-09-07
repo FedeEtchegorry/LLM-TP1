@@ -1818,3 +1818,63 @@ def permutation_curves(table: pd.DataFrame, *, title: str, path: Path) -> Path:
     )
     figure.tight_layout(rect=(0, 0.035, 1, 1))
     return _save(figure, path)
+
+
+def grouped_forest(groups, *, title: str, path: Path, xlabel: str) -> Path:
+    """El estudio de ablación entero en una figura: una fila por comparación, agrupadas.
+
+    ``groups`` es ``[(etiqueta, [(fila, media, error, se_separa), ...]), ...]``.
+
+    Es la forma estándar de presentar una ablación en un paper, y acá resuelve un
+    problema de tiempo: cinco ejes como cinco diapositivas de barras serían gráficos casi
+    idénticos que se comen los 20 minutos. El cero es "este módulo no cambia nada", y lo
+    que se lee es qué filas no lo tocan.
+
+    Las filas que cruzan el cero quedan en gris a propósito. Un forest plot donde casi
+    nada se separa del ruido no es un gráfico fallido: es el resultado, y comunica algo
+    verdadero sobre el tamaño del dataset.
+    """
+    rows = sum(len(items) for _, items in groups) + len(groups)
+    figure, axes = plt.subplots(figsize=(11, 0.42 * rows + 1.8))
+
+    position = 0
+    ticks, labels, headings, separators = [], [], [], []
+    axes.axvline(0.0, color="#22211f", linewidth=1.2, zorder=2)
+
+    for index, (group, items) in enumerate(groups):
+        if index:
+            separators.append(position - 0.5)
+        ticks.append(position)
+        labels.append(group)
+        headings.append(len(ticks) - 1)
+        position += 1
+
+        for label, mean, error, stands in items:
+            colour = MODEL_COLOR if stands else NEUTRAL
+            axes.errorbar(
+                mean, position, xerr=error, fmt="o", markersize=7.5, color=colour,
+                elinewidth=1.5, capsize=3.5, zorder=3,
+            )
+            ticks.append(position)
+            labels.append(f"    {label}")
+            position += 1
+
+    for line in separators:
+        axes.axhline(line, color="#E4E1DA", linewidth=1.0, zorder=0)
+
+    axes.set_yticks(ticks)
+    axes.set_yticklabels(labels, fontsize=9)
+    for index in headings:
+        tick = axes.get_yticklabels()[index]
+        tick.set_fontweight("bold")
+        tick.set_fontsize(10.5)
+        tick.set_color("#22211f")
+    axes.set_ylim(position - 0.4, -0.9)
+    axes.set_xlabel(xlabel)
+    axes.set_title(title)
+    axes.grid(axis="x", alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.margins(x=0.20)
+    _framed(axes)
+    figure.tight_layout()
+    return _save(figure, path)

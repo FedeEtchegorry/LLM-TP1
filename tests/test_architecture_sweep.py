@@ -9,6 +9,8 @@ import pytest
 from src.model.architecture_sweep import (
     AXES,
     BY_KEY,
+    CAPACITY_AXES,
+    MODULE_AXES,
     Measured,
     anchor_of,
     axes_for,
@@ -46,10 +48,27 @@ FLAT = (0.700, 0.700, 0.700)
 
 
 def test_the_base_is_measured_once_instead_of_once_per_axis(base):
-    """Cinco ejes con 16 valores declarados colapsan a doce configuraciones."""
-    assert sum(len(axis.values) for axis in AXES) == 16
-    assert len(unique_configs(base, AXES)) == 12
-    assert expected_runs(base, AXES) == 36
+    """Los diez ejes declaran 28 valores y colapsan a 19 configuraciones.
+
+    Cada eje repite el valor base, y todos comparten la misma: son 10 apariciones que
+    son una sola configuración. Sin ese colapso el barrido costaría 28 entrenamientos
+    por semilla en vez de 19.
+    """
+    assert sum(len(axis.values) for axis in AXES) == 28
+    assert len(unique_configs(base, AXES)) == 19
+    assert expected_runs(base, AXES) == 57
+
+
+def test_the_capacity_axes_are_the_five_d4_asked_for(base):
+    """D4 son los de capacidad; los de módulo son D8, D13, D6 y D5."""
+    assert [axis.field for axis in CAPACITY_AXES] == [
+        "n_heads", "n_layers", "d_model", "ffn_multiplier", "dropout",
+    ]
+    assert [axis.field for axis in MODULE_AXES] == [
+        "pooling", "positional", "embedding_norm", "tab_tower", "fusion_head",
+    ]
+    assert AXES == CAPACITY_AXES + MODULE_AXES
+    assert expected_runs(base, CAPACITY_AXES) == 36
 
 
 def test_every_declared_cell_can_actually_be_built(base):
