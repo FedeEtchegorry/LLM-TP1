@@ -47,4 +47,37 @@ batch_size         = 64
 seed               = 1337
 
 
+# La finalista, congelada antes de abrir el holdout. Repite cada valor en vez de
+# heredarlos de [DEFAULT]: si los heredara, editar [DEFAULT] para probar algo movería
+# tambien al finalista, que es exactamente lo que congelar tiene que impedir.
+# Su digest es d2872011c9c0, el mismo que [RUN] al 7 de septiembre, asi que reusa esas
+# tres corridas en lugar de entrenar de nuevo.
+[FINAL dos torres]
+model              = transformer
+text_fields        = title, description, ingredients
+categorical_fields = category, allergens
+numeric_fields     = price_position
+d_model            = 64
+n_layers           = 1
+n_heads            = 4
+ffn_multiplier     = 4
+dropout            = 0.1
+tokenizer          = wordpiece
+keep_brackets      = true
+positional         = learned
+embedding_norm     = true
+pooling            = cls
+pooler_projection  = true
+tab_tower          = mlp
+tabular_dim        = 16
+fusion_head        = mlp
+learning_rate      = 1e-4
+weight_decay       = 0.01
+epochs             = 150
+patience           = 10
+early_stopping     = ap
+batch_size         = 64
+seed               = 1337
+
+# La seccion de trabajo: se edita para correr cualquier otra cosa.
 [RUN]

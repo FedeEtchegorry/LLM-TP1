@@ -34,7 +34,14 @@ BRACKET_RUNS: dict[str, frozenset[str]] = {
     "L0b linear, extracted key only": TABULAR_FIELDS | DIAGNOSTIC_FIELDS,
 }
 
-FINALISTS: tuple[str, ...] = ("FINAL bracket d96 L2 h4 piecewise do0.3 lr2e-4 seed99",)
+FINALISTS: tuple[str, ...] = ("FINAL dos torres",)
+"""La configuracion que se puntea contra el holdout, congelada antes de abrirlo.
+
+Es la arquitectura declarada, no la celda que mas puntuo en validacion cruzada. La
+grilla de D1/D10 se diseno para probar un mecanismo y no como busqueda de arquitectura,
+y su celda mas alta -- sin parentesis y sin positional encoding -- es permutacion
+equivariante, o sea una bolsa de palabras. Lo que mide es +0,015 y se reporta; lo que se
+entrega es la arquitectura fiel."""
 
 EXPECTED_LADDER_MOVES = (("L1", "L2", ("n_layers",)),)
 

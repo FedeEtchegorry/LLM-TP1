@@ -75,6 +75,10 @@ class Level:
 
     @property
     def label(self) -> str:
+        """Una sola medicion no tiene dispersion medida, y un ``± 0.0000`` dice lo
+        contrario: se reporta como una medicion unica."""
+        if self.folds < 2:
+            return f"{self.average_precision:.4f} (una medicion)"
         return f"{self.average_precision:.4f} ± {self.deviation:.4f}"
 
 
