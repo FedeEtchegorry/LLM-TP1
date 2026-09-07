@@ -30,7 +30,7 @@ from sklearn.metrics import average_precision_score
 from sklearn.model_selection import StratifiedGroupKFold
 
 from src.model.baseline import target_of
-from src.model.configs import TRAINING, RunConfig
+from src.model.configs import STOP_ON_AP, STOP_ON_LOSS, TRAINING, RunConfig
 from src.model.encoding import EncodingSpec, RowEncoder
 from src.model.network import BtrTransformer, TowerBatch, count_parameters
 from src.model.protocol import ScoreFold
@@ -98,6 +98,19 @@ def early_stopping_split(
     )
 
 
+def stopping_score(criterion: str, stop_loss: float, stop_ap: float) -> float:
+    """Lo que el early stopping minimiza, para que las dos señales se comparen igual.
+
+    El AP se devuelve negado: menor es mejor en los dos casos, así que el resto del
+    bucle no distingue cuál de los dos criterios está corriendo.
+    """
+    if criterion == STOP_ON_LOSS:
+        return stop_loss
+    if criterion == STOP_ON_AP:
+        return -stop_ap
+    raise ValueError(f"unknown early stopping criterion: {criterion}")
+
+
 def train_fold(
     config: RunConfig,
     frame: pd.DataFrame,
@@ -135,7 +148,7 @@ def train_fold(
     generator = torch.Generator(device="cpu").manual_seed(seed)
 
     curve: list[EpochRecord] = []
-    best_loss, best_epoch = float("inf"), 0
+    best_score, best_epoch = float("inf"), 0
     best_state = copy.deepcopy(model.state_dict())
     best_states: list[tuple[float, int, dict]] = []
 
@@ -155,13 +168,14 @@ def train_fold(
             EpochRecord(epoch, train_loss, train_ap, stop_loss, stop_ap)
         )
 
+        score = stopping_score(config.early_stopping, stop_loss, stop_ap)
         if config.checkpoints > 1:
-            best_states.append((stop_loss, epoch, _on_cpu(model.state_dict())))
+            best_states.append((score, epoch, _on_cpu(model.state_dict())))
             best_states.sort(key=lambda kept: kept[0])
             del best_states[config.checkpoints :]
 
-        if stop_loss < best_loss:
-            best_loss, best_epoch = stop_loss, epoch
+        if score < best_score:
+            best_score, best_epoch = score, epoch
             best_state = copy.deepcopy(model.state_dict())
         elif epoch - best_epoch >= config.patience:
             break
