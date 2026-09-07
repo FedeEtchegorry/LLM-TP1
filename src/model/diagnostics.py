@@ -481,3 +481,82 @@ def tower_norms(model, encoder, frame: pd.DataFrame, indices) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(records)
+
+PERMUTED_FRACTIONS = (0.0, 0.25, 0.50, 0.75, 1.0)
+
+def permuted_text(text, fraction: float, generator):
+    import torch
+
+    ids = text.input_ids.clone()
+    types = text.token_type_ids.clone()
+    content = text.attention_mask.bool() & (ids != CLS) & (ids != SEP)
+
+    for row in range(ids.shape[0]):
+        where = content[row].nonzero(as_tuple=True)[0]
+        moving = int(round(fraction * len(where)))
+        if moving < 2:
+            continue
+        chosen = where[torch.randperm(len(where), generator=generator)[:moving]]
+        shuffled = chosen[torch.randperm(moving, generator=generator)]
+        ids[row, chosen] = ids[row, shuffled]
+        types[row, chosen] = types[row, shuffled]
+
+    return type(text)(
+        input_ids=ids,
+        token_type_ids=types,
+        attention_mask=text.attention_mask.clone(),
+    )
+
+
+def permutation_curve(
+    model,
+    encoder,
+    frame: pd.DataFrame,
+    indices,
+    actual,
+    *,
+    fractions=PERMUTED_FRACTIONS,
+    repeats: int = 5,
+    seed: int = 1337,
+) -> pd.DataFrame:
+    import torch
+
+    from src.model.training import predict
+
+    text, tabular = encoder.transform(frame, indices)
+    actual = np.asarray(actual)
+    rows = []
+    for fraction in fractions:
+        for repeat in range(repeats):
+            generator = torch.Generator().manual_seed(seed + repeat)
+            scored = Scored(
+                f"permutado {fraction:.0%}",
+                actual,
+                predict(model, (permuted_text(text, fraction, generator), tabular)),
+            )
+            rows.append(
+                {
+                    "fraction": float(fraction),
+                    "repeat": repeat,
+                    "average_precision": scored.average_precision,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def order_invariance(
+    model, encoder, frame: pd.DataFrame, indices, *, seed: int = 1337
+) -> float:
+    """How far a full permutation moves the pooled text vector.
+    On the text tower, not the AP, which turns last-bit ties into jitter.
+    """
+    import torch
+
+    text, _ = encoder.transform(frame, indices)
+    device = next(model.parameters()).device
+    generator = torch.Generator().manual_seed(seed)
+    model.eval()
+    with torch.no_grad():
+        intact = model.text_tower(text.to(device))
+        shuffled = model.text_tower(permuted_text(text, 1.0, generator).to(device))
+    return float((intact - shuffled).abs().max())

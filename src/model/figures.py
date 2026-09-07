@@ -1662,3 +1662,52 @@ def learning_curves(curves, *, title: str, path: Path) -> Path:
     _framed(axes)
     figure.tight_layout()
     return _save(figure, path)
+
+
+PERMUTATION_LABELS = {
+    "learned": "positional = learned",
+    "none": "positional = none (control)",
+}
+
+def permutation_curves(table: pd.DataFrame, *, title: str, path: Path) -> Path:
+    """What the model loses as the token order is destroyed, against a flat control."""
+    from src.model.diagnostics import PERMUTED_FRACTIONS
+
+    figure, axes = plt.subplots(figsize=(9, 5.5))
+
+    for order, (name, rows) in enumerate(table.groupby("model", sort=False)):
+        colour = PALETTE[order % len(PALETTE)]
+        by_fraction = rows.groupby("fraction")["average_precision"]
+        mean, spread = by_fraction.mean(), by_fraction.std().fillna(0.0)
+        axes.plot(
+            mean.index * 100, mean.to_numpy(),
+            marker="o", markersize=6, linewidth=1.8, color=colour,
+            label=PERMUTATION_LABELS.get(name, name),
+        )
+        axes.fill_between(
+            mean.index * 100, mean - spread, mean + spread,
+            color=colour, alpha=0.18, linewidth=0,
+        )
+        intact = float(mean.iloc[0])
+        axes.annotate(
+            f"{float(mean.iloc[-1]) - intact:+.4f}",
+            xy=(100, float(mean.iloc[-1])), xytext=(6, 0),
+            textcoords="offset points", va="center", fontsize=9, color=colour,
+        )
+
+    axes.set_xlabel("% de los tokens de la fila permutados")
+    axes.set_ylabel("Average precision")
+    axes.set_xticks([f * 100 for f in PERMUTED_FRACTIONS])
+    axes.grid(alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.margins(x=0.12)
+    axes.legend(loc="best", fontsize=9)
+    axes.set_title(title)
+    _framed(axes)
+    figure.text(
+        0.5, 0.005,
+        "cada curva es un modelo entrenado distinto",
+        ha="center", fontsize=8, color="#52514e",
+    )
+    figure.tight_layout(rect=(0, 0.035, 1, 1))
+    return _save(figure, path)
