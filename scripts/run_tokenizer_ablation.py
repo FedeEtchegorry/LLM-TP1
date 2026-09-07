@@ -21,9 +21,12 @@ from src.eda.loading import load_dataset
 from src.model.ablation import (
     Measured,
     cells_for,
+    d10_contrasts,
+    d1_contrasts,
     expected_runs,
-    interaction_table,
+    interaction_series,
     markdown_table,
+    plotted,
     read_d1,
     read_d10,
 )
@@ -36,7 +39,7 @@ from src.model.configs import (
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import partition, run_one
-from src.model.figures import FIGURES_DIR, interaction_grid, tokenizer_ablation
+from src.model.figures import FIGURES_DIR, interaction_lines, paired_contrasts
 from src.model.representation_selection import SEEDS
 from src.model.results import RESULTS_DIR, load
 
@@ -134,24 +137,33 @@ def main(argv: list[str] | None = None) -> int:
     figures = Path(args.figures)
     written = []
     if "D1" in tickets:
-        d1_cells = [item for item in measured if "D1" in item.cell.tickets]
         print("\n=== LECTURA DE D1 ===")
         print(read_d1(measured))
         written.append(
-            tokenizer_ablation(
-                d1_cells,
-                title="D1 — ¿los paréntesis o el tokenizador?",
-                path=figures / "tokenizer-ablation.png",
+            paired_contrasts(
+                plotted(d1_contrasts(measured)),
+                title="D1 — qué mueve el AP: los paréntesis, no el tokenizador",
+                xlabel="Diferencia de AP, pareada por semilla (barra = ±1 error)",
+                path=figures / "tokenizer-contrasts.png",
             )
         )
     if "D10" in tickets:
         print("\n=== LECTURA DE D10 ===")
         print(read_d10(measured))
         written.append(
-            interaction_grid(
-                interaction_table(measured),
-                title="D10 — paréntesis × positional",
-                path=figures / "interaction-grid.png",
+            interaction_lines(
+                interaction_series(measured),
+                xlabels=("sin paréntesis", "con paréntesis"),
+                title="D10 — los paréntesis sirven sólo si hay posiciones",
+                path=figures / "interaction-lines.png",
+            )
+        )
+        written.append(
+            paired_contrasts(
+                plotted(d10_contrasts(measured)),
+                title="D10 — el efecto de los paréntesis en cada nivel, y su interacción",
+                xlabel="Diferencia de AP, pareada por semilla (barra = ±1 error)",
+                path=figures / "interaction-contrasts.png",
             )
         )
 

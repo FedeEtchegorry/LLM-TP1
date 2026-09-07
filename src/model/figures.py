@@ -1566,65 +1566,81 @@ def gap_by_epoch(frame: pd.DataFrame, *, title: str, path: Path) -> Path:
     return _save(figure, path)
 
 
-def tokenizer_ablation(measured, *, title: str, path: Path) -> Path:
-    """Una fila por variante, el punto es la media entre semillas y la barra su desvío.
+def interaction_lines(series, *, xlabels, title: str, path: Path) -> Path:
+    """Dos líneas que no son paralelas: eso es la interacción, y así se lee sin restar.
 
-    El control va último y en otro color: la lectura de D1 no es cuál gana sino si el
-    control vuelve al nivel del regex, y ponerlo aparte evita que se lea como una
-    carrera de tres.
+    ``series`` es ``[(etiqueta, [(media, desvío), ...], (delta, error)), ...]``. El punto
+    lleva el desvío entre semillas de su celda, que es descriptivo; el ``delta`` anotado
+    al lado de cada línea es el contraste pareado, que es lo que sostiene la conclusión.
+    Una grilla de colores muestra los mismos cuatro números y obliga a restarlos de
+    memoria, además de que el ojo va a la celda más oscura en vez de a la diferencia.
     """
-    figure, axes = plt.subplots(figsize=(10, 1.3 * len(measured) + 1.8))
-    positions = list(range(len(measured)))[::-1]
+    figure, axes = plt.subplots(figsize=(9.5, 6))
+    x = np.arange(len(xlabels))
 
-    for position, item in zip(positions, measured):
-        colour = HIGHLIGHT if "control" in item.cell.label else MODEL_COLOR
+    for index, (label, points, delta) in enumerate(series):
+        colour = PALETTE[index % len(PALETTE)]
+        means = np.array([mean for mean, _ in points])
+        spreads = np.array([spread for _, spread in points])
         axes.errorbar(
-            item.mean, position, xerr=item.spread,
-            fmt="o", markersize=9, color=colour,
-            elinewidth=1.6, capsize=4, zorder=3,
+            x, means, yerr=spreads, fmt="o-", color=colour, linewidth=2.2,
+            markersize=9, elinewidth=1.4, capsize=5, label=label, zorder=3,
         )
-        axes.text(
-            item.mean, position + 0.24, f"{item.mean:.3f}",
-            ha="center", fontsize=10, color=colour,
+        # Sobre el tramo y del lado hacia el que sube: los extremos de dos lineas que
+        # se cruzan caen a la misma altura y ahi las anotaciones se pisan.
+        change, error = delta
+        axes.annotate(
+            f"{change:+.4f} ± {error:.4f}",
+            xy=(float(np.mean(x)), float(np.mean(means))),
+            xytext=(0, 12 if change > 0 else -12),
+            textcoords="offset points", ha="center",
+            va="bottom" if change > 0 else "top",
+            fontsize=11, color=colour, fontweight="medium",
         )
 
-    axes.set_yticks(positions)
-    axes.set_yticklabels([item.cell.label for item in measured], fontsize=10)
-    axes.set_xlabel("Average precision (media de 3 semillas, barra = ±1 desvío)")
+    axes.set_xticks(x)
+    axes.set_xticklabels(xlabels, fontsize=12)
+    axes.set_ylabel("Average precision (media de 3 semillas)")
     axes.set_title(title)
-    axes.grid(axis="x", alpha=0.25)
+    axes.grid(axis="y", alpha=0.25)
     axes.set_axisbelow(True)
-    axes.margins(x=0.18, y=0.22)
+    axes.margins(x=0.16, y=0.24)
+    axes.legend(loc="lower center", ncol=len(series), fontsize=11)
     _framed(axes)
     figure.tight_layout()
     return _save(figure, path)
 
 
-def interaction_grid(table, *, title: str, path: Path) -> Path:
-    """El 2×2 de D10 con el PR-AUC en cada celda.
+def paired_contrasts(contrasts, *, title: str, path: Path, xlabel: str) -> Path:
+    """Las diferencias contra cero, con su error pareado y la línea del cero.
 
-    La lectura es si la ganancia aparece en una sola celda. El sombreado va por valor
-    para que eso se vea sin comparar decimales.
+    Cada fila es una comparación, no una configuración: el cero es "no hay efecto" y lo
+    que se lee es si la barra lo cruza. Las que no lo cruzan van resaltadas, y las que sí
+    quedan en gris, porque una fila que cruza el cero es un resultado y no un hueco.
     """
-    figure, axes = plt.subplots(figsize=(7.5, 5.5))
-    image = axes.imshow(table, cmap="Blues", aspect="auto")
+    figure, axes = plt.subplots(figsize=(10, 1.05 * len(contrasts) + 2.0))
+    positions = list(range(len(contrasts)))[::-1]
 
-    for row in range(table.shape[0]):
-        for column in range(table.shape[1]):
-            value = table[row, column]
-            midpoint = (table.max() + table.min()) / 2
-            axes.text(
-                column, row, f"{value:.3f}",
-                ha="center", va="center", fontsize=17,
-                color="white" if value > midpoint else "#22211f",
-            )
+    axes.axvline(0.0, color="#22211f", linewidth=1.2, zorder=2)
+    for position, (label, mean, error, stands) in zip(positions, contrasts):
+        colour = MODEL_COLOR if stands else NEUTRAL
+        axes.errorbar(
+            mean, position, xerr=error, fmt="o", markersize=9, color=colour,
+            elinewidth=1.6, capsize=4, zorder=3,
+        )
+        axes.text(
+            mean, position + 0.26, f"{mean:+.4f}",
+            ha="center", fontsize=10, color=colour,
+        )
 
-    axes.set_xticks([0, 1])
-    axes.set_xticklabels(["sin paréntesis", "con paréntesis"], fontsize=11)
-    axes.set_yticks([0, 1])
-    axes.set_yticklabels(["positional\nlearned", "positional\nnone"], fontsize=11)
+    axes.set_yticks(positions)
+    axes.set_yticklabels([label for label, _, _, _ in contrasts], fontsize=10)
+    axes.set_xlabel(xlabel)
     axes.set_title(title)
-    figure.colorbar(image, ax=axes, label="Average precision", shrink=0.82)
+    axes.grid(axis="x", alpha=0.25)
+    axes.set_axisbelow(True)
+    axes.margins(x=0.22, y=0.20)
+    _framed(axes)
     figure.tight_layout()
     return _save(figure, path)
 
