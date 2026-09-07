@@ -120,24 +120,25 @@ class FieldSpan:
         return self.total - self.kept
 
 
-def longest_first(totals: list[int], budget: int) -> list[int]:
+def truncate_longest_first(lengths: tuple[int, ...], budget: int) -> tuple[int, ...]:
     """Share the budget by trimming the longest field, not by consuming left to right.
 
     No field is emptied while another one still has tokens to give up, and a tie is
     resolved against the later field: the end of the title is where the phrase lives.
     """
-    if sum(totals) <= budget:
-        return list(totals)
+    total = sum(lengths)
+    if total <= budget:
+        return tuple(lengths)
     cap = 0
-    while sum(min(total, cap + 1) for total in totals) <= budget:
+    while sum(min(length, cap + 1) for length in lengths) <= budget:
         cap += 1
-    kept = [min(total, cap) for total in totals]
-    for position, total in enumerate(totals):
+    kept = [min(length, cap) for length in lengths]
+    for position, length in enumerate(lengths):
         if sum(kept) >= budget:
             break
-        if total > kept[position]:
+        if length > kept[position]:
             kept[position] += 1
-    return kept
+    return tuple(kept)
 
 
 @dataclass(frozen=True)
@@ -301,8 +302,8 @@ class RowEncoder:
         return [self.encode(getattr(row, name)) for name in self.spec.text_fields]
 
     def _spans(self, tokens: list[list[int]]) -> tuple[FieldSpan, ...]:
-        kept = longest_first(
-            [len(field) for field in tokens], self.spec.max_text_tokens
+        kept = truncate_longest_first(
+            tuple(len(field) for field in tokens), self.spec.max_text_tokens
         )
         spans, cursor = [], 1
         for name, field, keep in zip(self.spec.text_fields, tokens, kept):
