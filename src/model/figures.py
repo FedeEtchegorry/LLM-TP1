@@ -1753,3 +1753,76 @@ def permutation_curves(table: pd.DataFrame, *, title: str, path: Path) -> Path:
     )
     figure.tight_layout(rect=(0, 0.035, 1, 1))
     return _save(figure, path)
+
+
+SWEEP_OUTCOME_COLOR = {
+    "base": NEUTRAL,
+    "improves": OBSERVED_COLOR,
+    "loses": BAR_COLOR,
+    "inconclusive": MODEL_COLOR,
+}
+
+
+def sweep_by_axis(stages: list[dict], *, title: str, path: Path) -> Path:
+    """Un panel por eje, cada valor como punto con su desvío entre semillas.
+
+    Deliberadamente no son barras. La pregunta de este barrido es si una diferencia
+    supera el ruido, y con barras hay que elegir entre empezar en cero -- donde
+    diferencias de 0,02 son invisibles -- o cortar el eje, que exagera lo mismo que se
+    está tratando de medir. Un punto con su barra de error responde la pregunta
+    directamente: si los intervalos se pisan, la diferencia no es distinguible.
+
+    La línea gris vertical es el valor base del eje, que es contra quien se compara.
+    """
+    columns = 2
+    rows = -(-len(stages) // columns)
+    figure, grid = plt.subplots(
+        rows, columns, figsize=(WIDE[0], 2.4 * rows), squeeze=False
+    )
+    panels = grid.ravel()
+    for spare in panels[len(stages):]:
+        spare.set_axis_off()
+
+    for panel, stage in zip(panels, stages):
+        points = stage["points"]
+        positions = list(range(len(points)))[::-1]
+        anchor = next((p for p in points if p["outcome"] == "base"), None)
+        if anchor is not None:
+            panel.axvline(anchor["ap"], color=NEUTRAL, linewidth=1.0,
+                          linestyle=(0, (4, 3)), zorder=1)
+
+        for position, point in zip(positions, points):
+            colour = SWEEP_OUTCOME_COLOR.get(point["outcome"], MODEL_COLOR)
+            panel.errorbar(
+                point["ap"], position, xerr=point.get("ap_std", 0.0),
+                fmt="o", markersize=8, color=colour,
+                elinewidth=1.5, capsize=4, zorder=3,
+            )
+            panel.text(
+                point["ap"], position + 0.28, f"{point['ap']:.3f}",
+                ha="center", fontsize=8.5, color=colour,
+            )
+
+        panel.set_yticks(positions)
+        panel.set_yticklabels([point["label"] for point in points], fontsize=9)
+        panel.set_title(stage["stage"], fontsize=11)
+        panel.grid(axis="x", alpha=0.25)
+        panel.set_axisbelow(True)
+        panel.margins(x=0.28, y=0.30)
+        _framed(panel)
+
+    handles = [
+        plt.Line2D([], [], marker="o", linestyle="", color=colour, label=label)
+        for label, colour in (
+            ("base", NEUTRAL),
+            ("mejora", OBSERVED_COLOR),
+            ("empeora", BAR_COLOR),
+            ("dentro del ruido", MODEL_COLOR),
+        )
+    ]
+    figure.legend(
+        handles=handles, loc="lower center", ncol=4, fontsize=9, frameon=False
+    )
+    figure.suptitle(title)
+    figure.tight_layout(rect=(0, 0.045, 1, 1))
+    return _save(figure, path)
