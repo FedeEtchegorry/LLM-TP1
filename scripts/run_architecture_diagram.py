@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         render(
             one_tower(),
-            title="Arquitectura de una sola torre — primera entrega",
+            title="Arquitectura de una sola torre",
             path=directory / "one-tower.png",
         ),
         render(

@@ -1,4 +1,4 @@
-"""E5: los cinco ejes de ablación consolidados en un solo forest plot.
+"""Los ejes de ablación consolidados en un solo forest plot.
 
     .venv/bin/python -m scripts.run_ablation_summary
 
@@ -77,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print("=== FUENTES ===")
     for label, source, document in (
-        ("tokenizador (D1)", TOKENIZER, tokenizer),
-        ("barrido de ejes (D4, D8, D13, D6, D5)", SWEEP, sweep),
+        ("tokenizador", TOKENIZER, tokenizer),
+        ("barrido de arquitectura", SWEEP, sweep),
     ):
         state = "leído" if document else "FALTA — correr su runner"
         print(f"  {label:<40s} {results / source}  [{state}]")

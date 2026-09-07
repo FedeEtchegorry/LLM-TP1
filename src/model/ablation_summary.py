@@ -1,28 +1,18 @@
-"""E5: los cinco ejes de ablación en un solo forest plot.
-
-En el mail de respuesta el grupo enumeró cinco ejes --tokenizador, embedder, encoder,
-pooler y MLP de salida-- así que están comprometidos por escrito y hay que mostrarlos
-todos. Cinco diapositivas de barras casi idénticas se comerían los 20 minutos y dejarían
-sin lugar a la arquitectura, que es lo que más veces pidieron. Un forest plot los pone en
-una.
+"""Todos los ejes de ablación en un solo forest plot.
 
 **No recalcula nada: lee los JSON que ya escribieron los runners.** Cada uno guarda las
 corridas por semilla, que es lo único que hace falta para reconstruir un
-:class:`~src.model.ablation.Contrast`. Consolidar leyendo en vez de reentrenando es lo
-que hace que esta figura cueste segundos y se pueda regenerar cada vez que llega una
-corrida nueva.
+:class:`~src.model.ablation.Contrast`. Consolidar leyendo en vez de reentrenando es lo que
+hace que esta figura cueste segundos y se pueda regenerar cada vez que llega una corrida
+nueva.
 
-**El margen es el pareado por semilla**, que es la regla que
-:mod:`src.model.ablation` declara para todo el trabajo. El ticket pedía «pareado por
-fold», pero se escribió el domingo 6/9 a las 16:29 y el ``Contrast`` que parea por semilla
-es del lunes 7/9 a las 11:45: la redacción del ticket es anterior a la decisión que la
-reemplaza. Usar dos reglas distintas haría que «no es distinguible» no significara lo
-mismo en dos filas del mismo gráfico.
+**El margen es el pareado por semilla**, la misma regla que declara
+:mod:`src.model.ablation`. Usar dos reglas distintas haría que «no es distinguible» no
+significara lo mismo en dos filas del mismo gráfico.
 
-**Lo que este gráfico habilita** es que sólo dos ejes necesiten profundizarse: el
-tokenizador, porque su control necesita explicación para que la lectura sea inequívoca, y
-el encoder, que es el que pidieron priorizar. El pooler, el MLP de salida y el embedder se
-leen de acá en treinta segundos cada uno.
+Un eje sin su valor base se descarta entero: sin ancla no hay contra qué comparar, y
+dibujarlo apoyado en el cero afirmaría un efecto que nadie midió. Las fuentes que faltan
+se informan por consola en lugar de producir una figura incompleta en silencio.
 """
 
 from __future__ import annotations
@@ -163,7 +153,7 @@ def markdown_table(built: list[Group]) -> str:
 
 
 def reading(built: list[Group]) -> str:
-    """La frase que E5 pide tener escrita de antemano por si nada supera el ruido."""
+    """La lectura del conjunto, incluido el caso en que nada supere el ruido."""
     if not built:
         return (
             "No hay ningún eje medido todavía: el resumen se arma leyendo los JSON que "

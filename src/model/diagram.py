@@ -1,23 +1,20 @@
 """Block diagrams of the two architectures, drawn from a declaration rather than by hand.
 
-The architecture slide is the one the defence opens on, and the first version of it was
-a raster export with no source file: correcting a tensor shape meant reopening whatever
-tool drew it. Declaring the boxes and the arrows here makes the diagram regenerate from
-``scripts.run_architecture_diagram`` like every other figure in ``figures/``.
+Declaring the boxes and the arrows here makes the diagram regenerate from
+``scripts.run_architecture_diagram`` like every other figure in ``figures/``, instead of
+living as a raster export whose source has to be reopened to fix a tensor shape.
 
-Two conventions the drawing enforces, because both were wrong or missing in the hand-made
-version:
+Two conventions the drawing enforces:
 
 **An arrow's label is the tensor that travels along it, not the one the box below
 produces.** The tokenizer receives raw text and emits ``(B, L)`` integers; ``d`` appears
-only after the embedding layer looks those integers up. Labelling the arrow out of the
-tokenizer ``(B, L, d)`` is the exact confusion the feedback asked about -- "¿cómo es que
-concatenan tokens con vectores?" -- so the shapes are attached to edges and read in
-order.
+only after the embedding layer looks those integers up, so labelling the arrow out of the
+tokenizer ``(B, L, d)`` would conflate ids with embeddings. The shapes are attached to
+edges and read in order.
 
 **A dashed border means the box has a declared alternative.** ``ARCHITECTURE.md`` §9
-lists the modules that vary, and drawing that on the diagram turns it into the index of
-the analysis: every dashed box is a ticket, and the footnote says which.
+lists the modules that vary, and drawing that on the diagram says at a glance which parts
+of the design were measured against something else and which are fixed.
 """
 
 from __future__ import annotations
@@ -197,8 +194,7 @@ def render(diagram: Diagram, *, title: str, path):
 def two_towers() -> Diagram:
     """The late-fusion architecture of ``ARCHITECTURE.md``.
 
-    Dashed boxes are the modules §9 declares alternatives for; the footnote maps each
-    one to the ticket that measures it.
+    Dashed boxes are the modules §9 declares alternatives for.
     """
     text_x, tab_x, mid_x = 28.0, 74.0, 51.0
     boxes = (
@@ -261,19 +257,18 @@ def two_towers() -> Diagram:
             "configuración base)\n"
             "x_tab = 12 category + 7 allergens + 10 price_position + 1 faltante = 30. "
             "Las 4.455 filas sin alérgeno declarado son todo-ceros, no una columna.\n"
-            "Borde punteado: el módulo tiene alternativas declaradas y medidas.\n"
-            "tokenizador D1 · positional D10 · encoder D4 · pooler D8 · "
-            "torre tabular D6 · fusión y MLP de salida D5"
+            "Borde punteado: el módulo tiene alternativas declaradas y medidas "
+            "(tokenizador, positional, encoder, pooler, torre tabular y MLP de salida)."
         ),
         figsize=(13.0, 15.0),
     )
 
 
 def personalised() -> Diagram:
-    """Ejercicio 3: where a user factor would enter, and what it would cost elsewhere.
+    """Where a user factor would enter, and what it would cost elsewhere.
 
-    The slide's first claim is about data, not architecture. The dataset has 22 columns
-    and none of them identifies a person -- ``query_id`` is a search, not a user -- so
+    The first constraint is data, not architecture. The dataset has 22 columns and none
+    of them identifies a person -- ``query_id`` is a search, not a user -- so
     the current target is a per-product marginal ``P(bought | producto)`` and no
     architectural change makes it conditional on someone.
 
@@ -344,11 +339,10 @@ def personalised() -> Diagram:
 
 
 def one_tower() -> Diagram:
-    """The single-sequence architecture of ``OLD_ARCHITECTURE.md``, for the before/after.
+    """The single-sequence architecture of ``OLD_ARCHITECTURE.md``.
 
-    Carries the dilution arithmetic as an annotation rather than as spoken text: the
-    three tabular columns took 7% of the pooled vector by construction, and that is a
-    number the slide can be challenged on.
+    Carries the dilution arithmetic as an annotation: the three tabular columns took 7%
+    of the pooled vector by construction, independently of how much signal they held.
     """
     mid_x = 50.0
     boxes = (

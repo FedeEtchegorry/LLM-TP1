@@ -1,24 +1,23 @@
-"""D4: los cinco ejes de capacidad del Transformer, un factor por vez.
+"""Barrido de arquitectura: un factor por vez, con el resto congelado en la base.
 
-Es lo que la devolución pidió priorizar --*"heads, cantidad de encoders apilados, d_model,
-dimension de la ffn, etc"*-- y los valores son los que el grupo se comprometió por mail.
+Dos familias de ejes. Los de **capacidad** cambian cuánto mide el encoder --heads, bloques
+apilados, ``d_model``, dimensión del FFN y dropout--. Los de **módulo** cambian qué se usa
+en cada lugar: pooler, positional encoding, la capa de cierre del embedding, la torre
+tabular y el MLP de salida.
 
-**La conclusión probable hay que anticiparla, no descubrirla en vivo.** Con desvíos de
-±0,015--0,019 entre folds, y sabiendo que en v1 quitar la autoatención entera ya quedó
-dentro del ruido (L1 0,757 contra L2 0,752), un barrido de anchos difícilmente produzca
-diferencias distinguibles. Por eso la tabla tiene una columna que dice si la diferencia
-supera el ruido.
+**El valor base aparece en todos los ejes y se mide una sola vez**: es la misma
+configuración y el caché por digest la reconoce. Sin ese colapso el barrido costaría 28
+entrenamientos por semilla en lugar de 19.
 
-**Cada valor se compara contra la base de su eje, pareado por semilla.** La regla es la
-:class:`~src.model.ablation.Contrast` que declara ese módulo, no una propia: si cada
-análisis del trabajo tuviera su umbral, «no es distinguible» no querría decir lo mismo en
-dos diapositivas seguidas. Restar las medias primero daría el mismo número con una
-incertidumbre mucho más grande, porque tira la estructura pareada que comparten las
-configuraciones al correr sobre los mismos folds y las mismas semillas.
+**Cada valor se compara contra la base de su eje, pareado por semilla**, con la
+:class:`~src.model.ablation.Contrast` que declara ese módulo en lugar de una regla propia.
+Restar las medias primero da el mismo número con una incertidumbre mucho más grande,
+porque tira la estructura pareada que comparten dos configuraciones al correr sobre los
+mismos folds y las mismas semillas.
 
-**Un factor por vez, con el resto congelado en la base.** El valor base aparece en los
-cinco ejes, así que se mide una sola vez: es la misma configuración, y el caché por digest
-la reconoce. Doce configuraciones, no dieciséis.
+Con desvíos entre folds de ±0,015-0,019 es esperable que casi ningún eje se separe del
+ruido, así que la tabla lleva una columna que lo dice explícitamente y la lectura cubre
+ese caso.
 
 ``d_model`` tiene que ser divisible por ``n_heads`` o el bloque de atención se niega a
 construirse. Como los dos son ejes del barrido, la grilla se valida antes de entrenar en
@@ -54,7 +53,7 @@ CAPACITY_AXES = (
     Axis("ffn", "ffn_multiplier", "Dimensión del FFN (× d_model)", (1, 2, 4)),
     Axis("dropout", "dropout", "Dropout", (0.0, 0.1, 0.3)),
 )
-"""Los cinco de D4: cuánta capacidad tiene el encoder."""
+"""Cuánta capacidad tiene el encoder."""
 
 MODULE_AXES = (
     Axis("pooling", "pooling", "Pooler", ("cls", "mean", "attention")),
@@ -64,12 +63,11 @@ MODULE_AXES = (
     Axis("tab", "tab_tower", "Torre tabular", ("linear", "mlp")),
     Axis("head", "fusion_head", "MLP de salida", ("linear", "mlp")),
 )
-"""Los que cambian qué módulo se usa, no cuánto mide: D8 (pooler), D13 (embedder),
-D6 (torre tabular) y D5 (MLP de salida).
+"""Los que cambian qué módulo se usa, no cuánto mide.
 
 Van en el mismo barrido que los de capacidad porque son la misma pregunta con la misma
 forma --un factor por vez contra la base, pareado por semilla-- y porque así comparten el
-valor base, que se mide una sola vez para los diez ejes en lugar de una por ticket."""
+valor base, que se mide una sola vez para los diez ejes."""
 
 AXES = CAPACITY_AXES + MODULE_AXES
 
@@ -103,8 +101,8 @@ def validate(base: RunConfig, axes: tuple[Axis, ...]) -> None:
 def unique_configs(base: RunConfig, axes: tuple[Axis, ...]) -> dict[str, RunConfig]:
     """Las configuraciones distintas de la grilla, indexadas por digest.
 
-    El valor base se repite en los cinco ejes y colapsa a una sola entrada, que es lo que
-    hace que el barrido cueste doce entrenamientos por semilla y no dieciséis.
+    El valor base se repite en los diez ejes y colapsa a una sola entrada, que es lo que
+    hace que el barrido cueste 19 entrenamientos por semilla y no 28.
     """
     found: dict[str, RunConfig] = {}
     for axis in axes:
@@ -161,7 +159,7 @@ def contrasts(measured: list[Measured], base: RunConfig) -> tuple[Contrast, ...]
 
 
 def markdown_table(measured: list[Measured], base: RunConfig) -> str:
-    """Una fila por configuración y la columna que el ticket pide explícitamente."""
+    """Una fila por configuración, con su margen contra la base y el veredicto."""
     lines = [
         "| Eje | Valor | PR-AUC | Δ vs base | Semillas de acuerdo | "
         "¿Distinguible del ruido? |",

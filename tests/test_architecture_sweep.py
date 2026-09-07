@@ -60,7 +60,7 @@ def test_the_base_is_measured_once_instead_of_once_per_axis(base):
 
 
 def test_the_capacity_axes_are_the_five_d4_asked_for(base):
-    """D4 son los de capacidad; los de módulo son D8, D13, D6 y D5."""
+    """Los de capacidad cambian cuánto mide el encoder; los de módulo, qué se usa."""
     assert [axis.field for axis in CAPACITY_AXES] == [
         "n_heads", "n_layers", "d_model", "ffn_multiplier", "dropout",
     ]
@@ -144,7 +144,7 @@ def test_reading_names_the_comparisons_that_moved(base):
     assert "superan el ruido" in text
 
 
-def test_markdown_table_carries_the_column_the_ticket_asks_for(base):
+def test_markdown_table_carries_the_noise_verdict(base):
     rows = [measured("heads", value, FLAT) for value in (2, 4, 8)]
     rendered = markdown_table(rows, base)
     assert "¿Distinguible del ruido?" in rendered

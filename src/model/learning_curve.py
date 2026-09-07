@@ -1,8 +1,8 @@
 """D3: cuánto más aprendería cada modelo si hubiera más filas.
 
 La escalera de v1 dejó al Transformer por debajo de la baseline lineal (AP 0,771) y muy
-por debajo del techo con la clave extraída a mano (0,813). Este ticket no intenta dar
-vuelta ese resultado: lo interpreta. **Lo que se lee acá no es quién está más arriba, es
+por debajo del techo con la clave extraída a mano (0,813). Esto no intenta dar vuelta
+ese resultado: lo interpreta. **Lo que se lee acá no es quién está más arriba, es
 la pendiente.**
 
 - Si la del Transformer sube más rápido, el límite no es la arquitectura sino tener

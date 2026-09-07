@@ -1,17 +1,16 @@
-"""D4: los cinco ejes de capacidad del Transformer, un factor por vez.
+"""Barrido de arquitectura: un factor por vez, con el resto congelado en la base.
 
     .venv/bin/python -m scripts.run_architecture_sweep --dry-run
     .venv/bin/python -m scripts.run_architecture_sweep --axes heads ffn
     .venv/bin/python -m scripts.run_architecture_sweep
 
-Es el barrido que la devolución pidió priorizar. El valor base se comparte entre los cinco
-ejes y se mide una sola vez, así que el barrido completo cuesta doce configuraciones por
-semilla y no dieciséis.
+El valor base se comparte entre todos los ejes y se mide una sola vez, así que el barrido
+completo cuesta 19 configuraciones por semilla y no 28.
 
 La grilla se valida antes de entrenar: si algún ``d_model`` no es divisible por su
 ``n_heads``, falla en el primer segundo en lugar de a mitad de la tercera hora.
 
-La lectura y la columna «¿distinguible del ruido?» viven en
+La grilla, la lectura y la columna «¿distinguible del ruido?» viven en
 :mod:`src.model.architecture_sweep`.
 """
 
@@ -152,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
 
     figure = paired_contrasts(
         plotted(contrasts(measured, base)),
-        title="D4 — cada eje contra su base, pareado por semilla",
+        title="Cada eje contra su base, pareado por semilla",
         xlabel="Diferencia de AP contra la base (barra = ±1 error)",
         path=Path(args.figures) / "architecture-sweep.png",
     )

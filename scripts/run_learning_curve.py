@@ -1,4 +1,4 @@
-"""D3: la curva de aprendizaje del Transformer contra la baseline lineal.
+"""Curva de aprendizaje del Transformer contra la baseline lineal.
 
     .venv/bin/python -m scripts.run_learning_curve --dry-run
     .venv/bin/python -m scripts.run_learning_curve
@@ -12,9 +12,8 @@ es la pendiente, no quién está más arriba: la lectura la escribe
 filas entraron, así que compartir directorio haría que el segundo tamaño leyera el
 resultado cacheado del primero y la curva saliera plana sin que nada avisara.
 
-La medición es sobre validación cruzada. El ticket pedía «PR-AUC en test» y también «la
-conclusión escrita antes de mirar el holdout»; las dos cosas no pueden ser, y la que
-protege el protocolo es la segunda.
+La medición es sobre validación cruzada y no sobre el holdout: la conclusión sobre la
+pendiente tiene que quedar escrita antes de gastarlo.
 """
 
 from __future__ import annotations
@@ -165,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             ]
             for model in MODELS
         },
-        title="D3 — curva de aprendizaje contra la baseline",
+        title="Curva de aprendizaje contra la baseline",
         path=Path(args.figures) / "learning-curve.png",
     )
 

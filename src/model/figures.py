@@ -1825,10 +1825,9 @@ def grouped_forest(groups, *, title: str, path: Path, xlabel: str) -> Path:
 
     ``groups`` es ``[(etiqueta, [(fila, media, error, se_separa), ...]), ...]``.
 
-    Es la forma estándar de presentar una ablación en un paper, y acá resuelve un
-    problema de tiempo: cinco ejes como cinco diapositivas de barras serían gráficos casi
-    idénticos que se comen los 20 minutos. El cero es "este módulo no cambia nada", y lo
-    que se lee es qué filas no lo tocan.
+    El cero es "este módulo no cambia nada", y lo que se lee es qué filas no lo tocan.
+    Poner todos los ejes juntos evita repetir el mismo gráfico una vez por eje y deja
+    comparar magnitudes entre ejes en la misma escala.
 
     Las filas que cruzan el cero quedan en gris a propósito. Un forest plot donde casi
     nada se separa del ruido no es un gráfico fallido: es el resultado, y comunica algo
