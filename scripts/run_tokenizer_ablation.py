@@ -1,10 +1,10 @@
-"""D1 y D10: qué aportan los paréntesis, y por qué lo aportan.
+"""TOKENIZER y INTERACTION: qué aportan los paréntesis, y por qué lo aportan.
 
     .venv/bin/python -m scripts.run_tokenizer_ablation --dry-run
-    .venv/bin/python -m scripts.run_tokenizer_ablation --tickets d1
+    .venv/bin/python -m scripts.run_tokenizer_ablation --analyses tokenizer
     .venv/bin/python -m scripts.run_tokenizer_ablation
 
-Los dos tickets comparten dos celdas de la grilla, así que pedirlos juntos cuesta cinco
+Los dos analyses comparten dos celdas de la grilla, así que pedirlos juntos cuesta cinco
 configuraciones y no siete: el caché por digest reconoce las repetidas. ``--dry-run``
 muestra la grilla, el digest de cada celda y cuáles ya están grabadas, sin entrenar nada.
 
@@ -21,14 +21,14 @@ from src.eda.loading import load_dataset
 from src.model.ablation import (
     Measured,
     cells_for,
-    d10_contrasts,
-    d1_contrasts,
+    interaction_contrasts,
+    tokenizer_contrasts,
     expected_runs,
     interaction_series,
     markdown_table,
     plotted,
-    read_d1,
-    read_d10,
+    read_tokenizer,
+    read_interaction,
 )
 from src.model.configs import (
     PARAMETERS_PATH,
@@ -43,7 +43,11 @@ from src.model.figures import FIGURES_DIR, interaction_lines, paired_contrasts
 from src.model.representation_selection import SEEDS
 from src.model.results import RESULTS_DIR, load
 
-TICKETS = {"d1": ("D1",), "d10": ("D10",), "both": ("D1", "D10")}
+ANALYSES = {
+    "tokenizer": ("tokenizer",),
+    "interaction": ("interaction",),
+    "both": ("tokenizer", "interaction"),
+}
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -52,7 +56,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--results", type=str, default=str(RESULTS_DIR))
     parser.add_argument("--figures", type=str, default=str(FIGURES_DIR / "ablation"))
     parser.add_argument("--config", type=str, default="RUN")
-    parser.add_argument("--tickets", choices=sorted(TICKETS), default="both")
+    parser.add_argument("--analyses", choices=sorted(ANALYSES), default="both")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -73,7 +77,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     utf8_console()
     args = parse_args(argv)
-    tickets = TICKETS[args.tickets]
+    analyses = ANALYSES[args.analyses]
 
     declared = load_parameters(args.parameters)
     require_valid(declared)
@@ -83,12 +87,12 @@ def main(argv: list[str] | None = None) -> int:
             f"hay {sorted(declared)}"
         )
     base = apply_overrides(declared[args.config], args.overrides)
-    cells = cells_for(tickets)
+    cells = cells_for(analyses)
 
-    print(f"=== GRILLA ({args.tickets}) ===")
+    print(f"=== GRILLA ({args.analyses}) ===")
     print(
         f"{len(cells)} configuraciones × {len(SEEDS)} semillas = "
-        f"{expected_runs(tickets)} entrenamientos"
+        f"{expected_runs(analyses)} entrenamientos"
     )
     cached = 0
     for cell in cells:
@@ -102,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"positional={cell.positional:<8s} "
                 f"{'[grabado]' if recorded else ''}"
             )
-    print(f"\n{cached} grabados, {expected_runs(tickets) - cached} por entrenar")
+    print(f"\n{cached} grabados, {expected_runs(analyses) - cached} por entrenar")
 
     if args.dry_run:
         print("\n--dry-run: no se entrenó nada")
@@ -136,43 +140,43 @@ def main(argv: list[str] | None = None) -> int:
 
     figures = Path(args.figures)
     written = []
-    if "D1" in tickets:
-        print("\n=== LECTURA DE D1 ===")
-        print(read_d1(measured))
+    if "tokenizer" in analyses:
+        print("\n=== LECTURA DE TOKENIZER ===")
+        print(read_tokenizer(measured))
         written.append(
             paired_contrasts(
-                plotted(d1_contrasts(measured)),
-                title="D1 — qué mueve el AP: los paréntesis, no el tokenizador",
+                plotted(tokenizer_contrasts(measured)),
+                title="TOKENIZER — qué mueve el AP: los paréntesis, no el tokenizador",
                 xlabel="Diferencia de AP, pareada por semilla (barra = ±1 error)",
                 path=figures / "tokenizer-contrasts.png",
             )
         )
-    if "D10" in tickets:
-        print("\n=== LECTURA DE D10 ===")
-        print(read_d10(measured))
+    if "interaction" in analyses:
+        print("\n=== LECTURA DE INTERACTION ===")
+        print(read_interaction(measured))
         written.append(
             interaction_lines(
                 interaction_series(measured),
                 xlabels=("sin paréntesis", "con paréntesis"),
-                title="D10 — los paréntesis sirven sólo si hay posiciones",
+                title="INTERACTION — los paréntesis sirven sólo si hay posiciones",
                 path=figures / "interaction-lines.png",
             )
         )
         written.append(
             paired_contrasts(
-                plotted(d10_contrasts(measured)),
-                title="D10 — el efecto de los paréntesis en cada nivel, y su interacción",
+                plotted(interaction_contrasts(measured)),
+                title="INTERACTION — el efecto de los paréntesis en cada nivel, y su interacción",
                 xlabel="Diferencia de AP, pareada por semilla (barra = ±1 error)",
                 path=figures / "interaction-contrasts.png",
             )
         )
 
-    summary = Path(args.results) / "ablation" / f"tokenizer-{args.tickets}.json"
+    summary = Path(args.results) / "ablation" / f"tokenizer-{args.analyses}.json"
     summary.parent.mkdir(parents=True, exist_ok=True)
     summary.write_text(
         json.dumps(
             {
-                "tickets": list(tickets),
+                "analyses": list(analyses),
                 "base_digest": base.digest,
                 "cells": [
                     {
@@ -187,8 +191,8 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     for item in measured
                 ],
-                "reading_d1": read_d1(measured) if "D1" in tickets else None,
-                "reading_d10": read_d10(measured) if "D10" in tickets else None,
+                "reading_tokenizer": read_tokenizer(measured) if "tokenizer" in analyses else None,
+                "reading_interaction": read_interaction(measured) if "interaction" in analyses else None,
             },
             indent=2,
         ),

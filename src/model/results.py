@@ -23,7 +23,7 @@ from src.model.protocol import EvaluationResult, FoldScore
 
 V1_RESULTS_DIR = Path("results/v1-una-torre")
 """La arquitectura de una sola torre: la escalera L0a-L0b, la busqueda dirigida y
-el holdout ya abierto. Es evidencia congelada de la primera entrega -- se lee, no
+el holdout ya abierto. Es evidencia congelada de la primera version -- se lee, no
 se reescribe. Los runners congelados la piden explicitamente con ``--results``."""
 
 RESULTS_DIR = Path("results/v2-dos-torres")

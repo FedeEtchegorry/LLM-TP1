@@ -1,27 +1,28 @@
-"""La grilla que comparten D1 y D10, y cómo se lee en cada uno de los dos sentidos.
+"""La grilla que comparten los dos análisis, y cómo se lee cada uno en los dos sentidos.
 
-D1 pregunta si la ganancia la dan los paréntesis o el tipo de tokenizador. D10 pregunta
+El del tokenizador pregunta si la ganancia la dan los paréntesis o el tipo de
+tokenizador. El de la interacción pregunta
 *por qué* la dan, apagando el mecanismo: sin positional encoding la self-attention es
 permutación-equivariante y ``[CLS]`` queda invariante a permutaciones del resto, así que
 el modelo ve un multiconjunto de tokens y el paréntesis está presente pero es inutilizable
 como delimitador.
 
-Los dos tickets se miden sobre la misma grilla porque **comparten dos celdas**. El caché
+Los dos analyses se miden sobre la misma grilla porque **comparten dos celdas**. El caché
 va por digest, así que declararlas una sola vez hace que correr los dos cueste seis
 configuraciones y no ocho:
 
 ======  ===========  ==============  ============  ==========
-celda   tokenizer    keep_brackets   positional    tickets
+celda   tokenizer    keep_brackets   positional    análisis
 ======  ===========  ==============  ============  ==========
-A       whole-word   False           learned       D1
-F       whole-word   True            learned       D1
-B       wordpiece    True            learned       D1, D10
-C       wordpiece    False           learned       D1, D10
-D       wordpiece    True            none          D10
-E       wordpiece    False           none          D10
+A       whole-word   False           learned       tokenizador
+F       whole-word   True            learned       tokenizador
+B       wordpiece    True            learned       tokenizador, interacción
+C       wordpiece    False           learned       tokenizador, interacción
+D       wordpiece    True            none          interacción
+E       wordpiece    False           none          interacción
 ======  ===========  ==============  ============  ==========
 
-D1 son las cuatro primeras: un 2x2 de ``tokenizer`` por ``keep_brackets``, no un eje de
+El del tokenizador son las cuatro primeras: un 2x2 de ``tokenizer`` por ``keep_brackets``, no un eje de
 tres brazos. Un eje de tres mueve las subpalabras y la puntuación a la vez entre v1 y la
 propuesta, y ninguna diferencia queda atribuible a una sola de las dos.
 
@@ -33,8 +34,8 @@ entera, no sólo los paréntesis. La afirmación fuerte sobre los paréntesis vi
 ``wordpiece``; la fila ``whole-word`` aporta la línea base histórica y el contraste de
 palabras enteras.
 
-**D1 corre con ``positional = learned`` fijo, y eso no es un detalle.** Corrido con
-``positional = none`` las cuatro celdas de texto miden lo mismo, D1 daría cero y la
+**El del tokenizador corre con ``positional = learned`` fijo, y eso no es un detalle.** Corrido con
+``positional = none`` las cuatro celdas de texto miden lo mismo, daría cero y la
 conclusión sería que los paréntesis no sirven. Queda declarado en la grilla en vez de
 confiado a que alguien se acuerde al lanzarlo.
 
@@ -53,8 +54,8 @@ import numpy as np
 from src.model.configs import RunConfig
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
 
-D1 = "D1"
-D10 = "D10"
+TOKENIZER = "tokenizer"
+INTERACTION = "interaction"
 
 WHOLE_WORD = "whole-word"
 WORDPIECE = "wordpiece"
@@ -64,14 +65,14 @@ NONE = "none"
 
 @dataclass(frozen=True)
 class Cell:
-    """Una configuración de la grilla, con los tickets que la usan."""
+    """Una configuración de la grilla, con los analyses que la usan."""
 
     key: str
     label: str
     tokenizer: str
     keep_brackets: bool
     positional: str
-    tickets: tuple[str, ...]
+    analyses: tuple[str, ...]
 
     def config(self, base: RunConfig, seed: int) -> RunConfig:
         return replace(
@@ -84,20 +85,20 @@ class Cell:
 
 
 GRID = (
-    Cell("A", "regex de v1 (sin puntuación)", WHOLE_WORD, False, LEARNED, (D1,)),
-    Cell("F", "palabras enteras con puntuación", WHOLE_WORD, True, LEARNED, (D1,)),
-    Cell("B", "WordPiece con paréntesis", WORDPIECE, True, LEARNED, (D1, D10)),
-    Cell("C", "WordPiece sin paréntesis (control)", WORDPIECE, False, LEARNED, (D1, D10)),
-    Cell("D", "WordPiece con paréntesis · positional=none", WORDPIECE, True, NONE, (D10,)),
-    Cell("E", "WordPiece sin paréntesis · positional=none", WORDPIECE, False, NONE, (D10,)),
+    Cell("A", "regex de v1 (sin puntuación)", WHOLE_WORD, False, LEARNED, (TOKENIZER,)),
+    Cell("F", "palabras enteras con puntuación", WHOLE_WORD, True, LEARNED, (TOKENIZER,)),
+    Cell("B", "WordPiece con paréntesis", WORDPIECE, True, LEARNED, (TOKENIZER, INTERACTION)),
+    Cell("C", "WordPiece sin paréntesis (control)", WORDPIECE, False, LEARNED, (TOKENIZER, INTERACTION)),
+    Cell("D", "WordPiece con paréntesis · positional=none", WORDPIECE, True, NONE, (INTERACTION,)),
+    Cell("E", "WordPiece sin paréntesis · positional=none", WORDPIECE, False, NONE, (INTERACTION,)),
 )
 
 BY_KEY = {cell.key: cell for cell in GRID}
 
 
-def cells_for(tickets: tuple[str, ...]) -> tuple[Cell, ...]:
-    """Las celdas que hacen falta para los tickets pedidos, sin repetir las compartidas."""
-    return tuple(cell for cell in GRID if set(cell.tickets) & set(tickets))
+def cells_for(analyses: tuple[str, ...]) -> tuple[Cell, ...]:
+    """Las celdas que hacen falta para los analyses pedidos, sin repetir las compartidas."""
+    return tuple(cell for cell in GRID if set(cell.analyses) & set(analyses))
 
 
 @dataclass(frozen=True)
@@ -196,7 +197,7 @@ def _interaction(label: str, first: Contrast, second: Contrast) -> Contrast:
     )
 
 
-def d1_contrasts(measured: list[Measured]) -> tuple[Contrast, ...]:
+def tokenizer_contrasts(measured: list[Measured]) -> tuple[Contrast, ...]:
     """Los cuatro contrastes del 2x2, en el orden en que se leen y se dibujan."""
     found = _by_key(measured)
     a, f, b, c = found["A"], found["F"], found["B"], found["C"]
@@ -208,7 +209,7 @@ def d1_contrasts(measured: list[Measured]) -> tuple[Contrast, ...]:
     )
 
 
-def d10_contrasts(measured: list[Measured]) -> tuple[Contrast, Contrast, Contrast]:
+def interaction_contrasts(measured: list[Measured]) -> tuple[Contrast, Contrast, Contrast]:
     """Los dos efectos de los paréntesis y la interacción entre ellos."""
     found = _by_key(measured)
     b, c, d, e = found["B"], found["C"], found["D"], found["E"]
@@ -228,7 +229,7 @@ def d10_contrasts(measured: list[Measured]) -> tuple[Contrast, Contrast, Contras
 def interaction_series(measured: list[Measured]):
     """El 2x2 como dos líneas: un punto por nivel de paréntesis, y el delta pareado."""
     found = _by_key(measured)
-    with_positions, without_positions, _ = d10_contrasts(measured)
+    with_positions, without_positions, _ = interaction_contrasts(measured)
     return [
         (
             "positional = learned",
@@ -251,14 +252,14 @@ def plotted(contrasts) -> list[tuple[str, float, float, bool]]:
     ]
 
 
-def read_d1(measured: list[Measured]) -> str:
-    """La conclusión de D1, escrita en cualquiera de los sentidos en que salga."""
+def read_tokenizer(measured: list[Measured]) -> str:
+    """La conclusión del análisis del tokenizador, escrita en cualquiera de los sentidos en que salga."""
     found = _by_key(measured)
     missing = {"A", "F", "B", "C"} - set(found)
     if missing:
-        return f"D1 incompleto: faltan las celdas {sorted(missing)}"
+        return f"análisis del tokenizador incompleto: faltan las celdas {sorted(missing)}"
 
-    brackets, punctuation, tokenizer, marked = d1_contrasts(measured)
+    brackets, punctuation, tokenizer, marked = tokenizer_contrasts(measured)
     lines = [str(item) for item in (brackets, punctuation, tokenizer, marked)]
     if brackets.distinguishable and not tokenizer.distinguishable:
         lines.append(
@@ -289,14 +290,14 @@ def read_d1(measured: list[Measured]) -> str:
     return "\n".join(lines)
 
 
-def read_d10(measured: list[Measured]) -> str:
-    """La lectura de D10: la ganancia tiene que aparecer en una sola celda."""
+def read_interaction(measured: list[Measured]) -> str:
+    """La lectura de la interacción: la ganancia tiene que aparecer en una sola celda."""
     found = _by_key(measured)
     missing = {"B", "C", "D", "E"} - set(found)
     if missing:
-        return f"D10 incompleto: faltan las celdas {sorted(missing)}"
+        return f"análisis de la interacción incompleto: faltan las celdas {sorted(missing)}"
 
-    with_positions, without_positions, interaction = d10_contrasts(measured)
+    with_positions, without_positions, interaction = interaction_contrasts(measured)
     lines = [str(item) for item in (with_positions, without_positions, interaction)]
     anchored = not without_positions.distinguishable or without_positions.mean < 0
 
@@ -308,7 +309,7 @@ def read_d10(measured: list[Measured]) -> str:
     elif not interaction.distinguishable and without_positions.mean > 0:
         lines.append(
             "Los paréntesis ganan también sin positional encoding, así que el mecanismo "
-            "NO es el anclaje posicional y la historia de D1 es falsa. Se reporta."
+            "NO es el anclaje posicional y la historia del tokenizador es falsa. Se reporta."
         )
     else:
         lines.append(
@@ -341,6 +342,6 @@ def markdown_table(measured: list[Measured]) -> str:
     return "\n".join(lines)
 
 
-def expected_runs(tickets: tuple[str, ...]) -> int:
-    """Cuántos entrenamientos completos implica pedir estos tickets."""
-    return len(cells_for(tickets)) * len(SEEDS)
+def expected_runs(analyses: tuple[str, ...]) -> int:
+    """Cuántos entrenamientos completos implica pedir estos analyses."""
+    return len(cells_for(analyses)) * len(SEEDS)

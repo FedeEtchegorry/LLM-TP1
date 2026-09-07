@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.model.ablation import BY_KEY as CELLS
-from src.model.ablation import Contrast, Measured, contrast, d1_contrasts
+from src.model.ablation import Contrast, Measured, contrast, tokenizer_contrasts
 from src.model.architecture_sweep import AXES
 from src.model.configs import RunConfig
 
@@ -103,7 +103,7 @@ def tokenizer_group(document: dict) -> Group | None:
     }
     if not {"A", "F", "B", "C"} <= set(cells):
         return None
-    return Group(TOKENIZER_GROUP, d1_contrasts(list(cells.values())))
+    return Group(TOKENIZER_GROUP, tokenizer_contrasts(list(cells.values())))
 
 
 def groups(

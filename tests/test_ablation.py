@@ -12,14 +12,14 @@ from src.model.ablation import (
     Measured,
     cells_for,
     contrast,
-    d1_contrasts,
-    d10_contrasts,
+    tokenizer_contrasts,
+    interaction_contrasts,
     expected_runs,
     interaction_series,
     markdown_table,
     plotted,
-    read_d1,
-    read_d10,
+    read_tokenizer,
+    read_interaction,
 )
 
 
@@ -45,19 +45,19 @@ def shifted(value: float) -> tuple[float, float, float]:
     return (value - 0.01, value, value + 0.01)
 
 
-def test_d1_runs_with_learned_positions():
-    """Con positional=none D1 mediría cero: la restricción vive en la grilla."""
+def test_the_tokenizer_grid_runs_with_learned_positions():
+    """Con positional=none no habría nada que medir: la restricción vive en la grilla."""
     for cell in GRID:
-        if "D1" in cell.tickets:
+        if "tokenizer" in cell.analyses:
             assert cell.positional == LEARNED
 
 
-def test_the_two_tickets_share_cells_instead_of_duplicating_them():
-    """D1 es un 2x2 de tokenizer × keep_brackets; B y C las comparte con D10."""
-    assert len(cells_for(("D1",))) == 4
-    assert len(cells_for(("D10",))) == 4
-    assert len(cells_for(("D1", "D10"))) == 6
-    assert expected_runs(("D1", "D10")) == 18
+def test_the_two_analyses_share_cells_instead_of_duplicating_them():
+    """El del tokenizador es un 2x2; B y C las comparte con el de la interacción."""
+    assert len(cells_for(("tokenizer",))) == 4
+    assert len(cells_for(("interaction",))) == 4
+    assert len(cells_for(("tokenizer", "interaction"))) == 6
+    assert expected_runs(("tokenizer", "interaction")) == 18
 
 
 def test_pairing_cancels_the_variation_shared_between_seeds():
@@ -77,8 +77,8 @@ def test_a_contrast_whose_sign_flips_is_not_distinguishable():
     assert not step.distinguishable
 
 
-def test_d1_reads_brackets_when_the_control_falls_back_to_v1():
-    reading = read_d1(
+def test_tokenizer_reads_brackets_when_the_control_falls_back_to_v1():
+    reading = read_tokenizer(
         [
             measured("A", shifted(0.600)), measured("F", shifted(0.770)),
             measured("B", shifted(0.780)), measured("C", shifted(0.600)),
@@ -87,8 +87,8 @@ def test_d1_reads_brackets_when_the_control_falls_back_to_v1():
     assert "viene de conservar los paréntesis" in reading
 
 
-def test_d1_reads_tokenizer_when_the_control_keeps_the_gain():
-    reading = read_d1(
+def test_tokenizer_reads_tokenizer_when_the_control_keeps_the_gain():
+    reading = read_tokenizer(
         [
             measured("A", shifted(0.600)), measured("F", shifted(0.600)),
             measured("B", shifted(0.780)), measured("C", shifted(0.780)),
@@ -98,13 +98,13 @@ def test_d1_reads_tokenizer_when_the_control_keeps_the_gain():
     assert "no se sostiene" in reading
 
 
-def test_d1_reports_a_null_result_as_a_result():
+def test_tokenizer_reports_a_null_result_as_a_result():
     rows = [measured(key, shifted(0.700)) for key in ("A", "F", "B", "C")]
-    assert "Ninguno de los dos factores" in read_d1(rows)
+    assert "Ninguno de los dos factores" in read_tokenizer(rows)
 
 
-def test_d1_says_when_both_factors_move_the_metric():
-    reading = read_d1(
+def test_tokenizer_says_when_both_factors_move_the_metric():
+    reading = read_tokenizer(
         [
             measured("A", shifted(0.600)), measured("F", shifted(0.650)),
             measured("B", shifted(0.800)), measured("C", shifted(0.700)),
@@ -113,18 +113,18 @@ def test_d1_says_when_both_factors_move_the_metric():
     assert "Las dos cosas aportan" in reading
 
 
-def test_d1_always_reports_the_whole_word_row_as_coarser():
+def test_tokenizer_always_reports_the_whole_word_row_as_coarser():
     rows = [measured(key, shifted(0.700)) for key in ("A", "F", "B", "C")]
-    assert "no el factor limpio" in read_d1(rows)
+    assert "no el factor limpio" in read_tokenizer(rows)
 
 
-def test_d1_has_the_four_contrasts_of_the_square():
+def test_tokenizer_has_the_four_contrasts_of_the_square():
     rows = [measured(key, shifted(0.700)) for key in ("A", "F", "B", "C")]
-    assert len(d1_contrasts(rows)) == 4
+    assert len(tokenizer_contrasts(rows)) == 4
 
 
-def test_d10_confirms_the_mechanism_when_the_gain_needs_positions():
-    reading = read_d10(
+def test_interaction_confirms_the_mechanism_when_the_gain_needs_positions():
+    reading = read_interaction(
         [
             measured("B", shifted(0.780)), measured("C", shifted(0.600)),
             measured("D", shifted(0.600)), measured("E", shifted(0.600)),
@@ -134,8 +134,8 @@ def test_d10_confirms_the_mechanism_when_the_gain_needs_positions():
     assert "el mecanismo es posicional" in reading
 
 
-def test_d10_refutes_the_story_when_the_gain_survives_without_positions():
-    reading = read_d10(
+def test_interaction_refutes_the_story_when_the_gain_survives_without_positions():
+    reading = read_interaction(
         [
             measured("B", shifted(0.780)), measured("C", shifted(0.600)),
             measured("D", shifted(0.780)), measured("E", shifted(0.600)),
@@ -145,14 +145,14 @@ def test_d10_refutes_the_story_when_the_gain_survives_without_positions():
     assert "es falsa" in reading
 
 
-def test_d10_has_two_effects_and_their_interaction():
+def test_interaction_has_two_effects_and_their_interaction():
     rows = [measured(key, shifted(0.700)) for key in ("B", "C", "D", "E")]
-    assert len(d10_contrasts(rows)) == 3
+    assert len(interaction_contrasts(rows)) == 3
 
 
 def test_an_incomplete_grid_says_so_instead_of_inventing_a_reading():
-    assert "incompleto" in read_d1([measured("A", flat(0.6))])
-    assert "incompleto" in read_d10([measured("B", flat(0.6))])
+    assert "incompleto" in read_tokenizer([measured("A", flat(0.6))])
+    assert "incompleto" in read_interaction([measured("B", flat(0.6))])
 
 
 def test_interaction_series_has_a_line_per_positional_level():
@@ -171,7 +171,7 @@ def test_interaction_series_has_a_line_per_positional_level():
 
 def test_plotted_carries_what_the_figure_needs():
     rows = [measured(key, shifted(0.700)) for key in ("A", "F", "B", "C")]
-    for label, mean, error, stands in plotted(d1_contrasts(rows)):
+    for label, mean, error, stands in plotted(tokenizer_contrasts(rows)):
         assert isinstance(label, str) and label
         assert isinstance(mean, float)
         assert isinstance(error, float)
