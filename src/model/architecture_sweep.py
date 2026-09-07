@@ -7,9 +7,14 @@ dimension de la ffn, etc"*-- y los valores son los que el grupo se comprometió 
 ±0,015--0,019 entre folds, y sabiendo que en v1 quitar la autoatención entera ya quedó
 dentro del ruido (L1 0,757 contra L2 0,752), un barrido de anchos difícilmente produzca
 diferencias distinguibles. Por eso la tabla tiene una columna que dice si la diferencia
-supera el ruido, y por eso la regla que la decide es la misma que declara
-:mod:`src.model.ablation`: si cada análisis del trabajo usara su propio umbral, «no es
-distinguible» no querría decir lo mismo en dos diapositivas seguidas.
+supera el ruido.
+
+**Cada valor se compara contra la base de su eje, pareado por semilla.** La regla es la
+:class:`~src.model.ablation.Contrast` que declara ese módulo, no una propia: si cada
+análisis del trabajo tuviera su umbral, «no es distinguible» no querría decir lo mismo en
+dos diapositivas seguidas. Restar las medias primero daría el mismo número con una
+incertidumbre mucho más grande, porque tira la estructura pareada que comparten las
+configuraciones al correr sobre los mismos folds y las mismas semillas.
 
 **Un factor por vez, con el resto congelado en la base.** El valor base aparece en los
 cinco ejes, así que se mide una sola vez: es la misma configuración, y el caché por digest
@@ -24,14 +29,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from src.model.ablation import distinguishable
+from src.model.ablation import Contrast, contrast
 from src.model.configs import RunConfig
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
-
-BASE = "base"
-IMPROVES = "improves"
-LOSES = "loses"
-INCONCLUSIVE = "inconclusive"
 
 
 @dataclass(frozen=True)
@@ -117,123 +117,84 @@ class Measured:
         return seed_spread([list(run) for run in self.runs], label=self.label)
 
 
-def outcome(item: Measured, base_value: object, base_mean: float, base_spread: float) -> str:
-    """Cómo se compara un valor contra la base del mismo eje."""
-    if item.value == base_value:
-        return BASE
-    delta = item.mean - base_mean
-    if not distinguishable(delta, (item.spread, base_spread)):
-        return INCONCLUSIVE
-    return IMPROVES if delta > 0 else LOSES
+def anchor_of(measured: list[Measured], axis: Axis, base: RunConfig) -> Measured | None:
+    """La medición del valor base de un eje, que es contra quien se compara todo lo demás."""
+    base_value = getattr(base, axis.field)
+    return next(
+        (item for item in measured if item.axis.key == axis.key and item.value == base_value),
+        None,
+    )
 
 
-def stages(measured: list[Measured], base: RunConfig) -> list[dict]:
-    """La grilla en la forma que ``figures.architecture_grid`` ya sabe dibujar."""
+def contrasts(measured: list[Measured], base: RunConfig) -> tuple[Contrast, ...]:
+    """Un contraste por valor no-base, pareado semilla contra semilla contra su base."""
     built = []
     for axis in AXES:
-        items = [item for item in measured if item.axis.key == axis.key]
-        if not items:
+        anchor = anchor_of(measured, axis, base)
+        if anchor is None:
             continue
-        base_value = getattr(base, axis.field)
-        anchor = next((item for item in items if item.value == base_value), None)
-        base_mean = anchor.mean if anchor else 0.0
-        base_spread = anchor.spread if anchor else 0.0
-        points = [
-            {
-                "label": str(item.value),
-                "ap": item.mean,
-                "ap_std": item.spread,
-                "outcome": outcome(item, base_value, base_mean, base_spread),
-            }
-            for item in sorted(items, key=lambda i: i.mean, reverse=True)
-        ]
-        built.append(
-            {
-                "stage": axis.label,
-                "points": points,
-                "selected": max(points, key=lambda point: point["ap"])["label"],
-            }
-        )
-    return built
-
-
-VERDICTS = {
-    BASE: "base",
-    IMPROVES: "mejora",
-    LOSES: "empeora",
-    INCONCLUSIVE: "dentro del ruido",
-}
+        for item in measured:
+            if item.axis.key != axis.key or item.value == anchor.value:
+                continue
+            built.append(
+                contrast(f"{axis.field}: {anchor.value} → {item.value}", item, anchor)
+            )
+    return tuple(built)
 
 
 def markdown_table(measured: list[Measured], base: RunConfig) -> str:
     """Una fila por configuración y la columna que el ticket pide explícitamente."""
     lines = [
-        "| Eje | Valor | PR-AUC | Δ vs base | ¿Distinguible del ruido? |",
-        "|---|---|---:|---:|---|",
+        "| Eje | Valor | PR-AUC | Δ vs base | Semillas de acuerdo | "
+        "¿Distinguible del ruido? |",
+        "|---|---|---:|---:|:---:|---|",
     ]
     for axis in AXES:
         items = [item for item in measured if item.axis.key == axis.key]
-        if not items:
+        anchor = anchor_of(measured, axis, base)
+        if not items or anchor is None:
             continue
-        base_value = getattr(base, axis.field)
-        anchor = next((item for item in items if item.value == base_value), None)
-        base_mean = anchor.mean if anchor else 0.0
-        base_spread = anchor.spread if anchor else 0.0
         for item in sorted(items, key=lambda i: str(i.value)):
-            verdict = outcome(item, base_value, base_mean, base_spread)
-            delta = "—" if verdict == BASE else f"{item.mean - base_mean:+.4f}"
+            if item.value == anchor.value:
+                lines.append(
+                    f"| {axis.label} | {item.value} | {item.mean:.4f} ± {item.spread:.4f} "
+                    f"| — | — | base |"
+                )
+                continue
+            step = contrast(axis.field, item, anchor)
+            verdict = "distinguible" if step.distinguishable else "dentro del ruido"
             lines.append(
                 f"| {axis.label} | {item.value} | {item.mean:.4f} ± {item.spread:.4f} "
-                f"| {delta} | {VERDICTS[verdict]} |"
+                f"| {step.mean:+.4f} ± {step.error:.4f} "
+                f"| {step.agree}/{len(step.differences)} | {verdict} |"
             )
     return "\n".join(lines)
 
 
 def reading(measured: list[Measured], base: RunConfig) -> str:
     """Qué se dice sobre el barrido, en cualquiera de los dos sentidos en que salga."""
-    if not measured:
+    steps = contrasts(measured, base)
+    if not steps:
         return "barrido vacío"
-    moved = []
-    for axis in AXES:
-        items = [item for item in measured if item.axis.key == axis.key]
-        if not items:
-            continue
-        base_value = getattr(base, axis.field)
-        anchor = next((item for item in items if item.value == base_value), None)
-        if anchor is None:
-            continue
-        for item in items:
-            verdict = outcome(item, base_value, anchor.mean, anchor.spread)
-            if verdict in (IMPROVES, LOSES):
-                moved.append((axis, item, verdict))
 
+    lines = [str(step) for step in steps]
+    moved = [step for step in steps if step.distinguishable]
     if not moved:
-        return (
+        lines.append(
             "Ningún eje mueve el PR-AUC por encima del ruido entre semillas. Es el "
             "resultado esperado y se reporta como tal: con ±0,015-0,019 entre folds, y "
             "sabiendo que en v1 quitar la autoatención entera ya quedó dentro del ruido, "
             "el tamaño del modelo no es lo que limita este problema. Subir capacidad no "
             "compra nada acá."
         )
-    lines = ["Ejes que sí mueven el PR-AUC por encima del ruido:"]
-    for axis, item, verdict in moved:
+    else:
         lines.append(
-            f"  {axis.label}: {item.value} {VERDICTS[verdict]} "
-            f"({item.mean - _anchor_mean(measured, axis, base):+.4f})"
+            f"{len(moved)} de {len(steps)} comparaciones superan el ruido: "
+            + "; ".join(f"{step.label} ({step.mean:+.4f})" for step in moved)
+            + ". El resto queda dentro del ruido y se reporta así, en vez de leer una "
+            "diferencia de tercer decimal como si fuera señal."
         )
-    lines.append(
-        "El resto queda dentro del ruido y se reporta así, en vez de leer una diferencia "
-        "de tercer decimal como si fuera señal."
-    )
     return "\n".join(lines)
-
-
-def _anchor_mean(measured: list[Measured], axis: Axis, base: RunConfig) -> float:
-    base_value = getattr(base, axis.field)
-    anchor = next(
-        (i for i in measured if i.axis.key == axis.key and i.value == base_value), None
-    )
-    return anchor.mean if anchor else 0.0
 
 
 def expected_runs(base: RunConfig, axes: tuple[Axis, ...]) -> int:

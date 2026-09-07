@@ -22,14 +22,15 @@ import json
 from pathlib import Path
 
 from src.eda.loading import load_dataset
+from src.model.ablation import plotted
 from src.model.architecture_sweep import (
     AXES,
     Measured,
     axes_for,
+    contrasts,
     expected_runs,
     markdown_table,
     reading,
-    stages,
     unique_configs,
     validate,
 )
@@ -42,7 +43,7 @@ from src.model.configs import (
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import partition, run_one
-from src.model.figures import FIGURES_DIR, sweep_by_axis
+from src.model.figures import FIGURES_DIR, paired_contrasts
 from src.model.representation_selection import SEEDS
 from src.model.results import RESULTS_DIR, load
 
@@ -149,9 +150,10 @@ def main(argv: list[str] | None = None) -> int:
     conclusion = reading(measured, base)
     print(conclusion)
 
-    figure = sweep_by_axis(
-        stages(measured, base),
-        title="D4 — variaciones de arquitectura del Transformer",
+    figure = paired_contrasts(
+        plotted(contrasts(measured, base)),
+        title="D4 — cada eje contra su base, pareado por semilla",
+        xlabel="Diferencia de AP contra la base (barra = ±1 error)",
         path=Path(args.figures) / "architecture-sweep.png",
     )
 
