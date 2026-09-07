@@ -223,11 +223,11 @@ def two_towers() -> Diagram:
         Box("tab_in", "category · allergens · price_position", tab_x, 95, 40,
             ("categóricas + numérica",), TABULAR_COLOR),
         Box("encoding", "Codificación tabular", tab_x, 80, 40,
-            ("one-hot(12) · one-hot(8)",
+            ("one-hot(12) · one-hot(7)",
              "piecewise-linear(10) + faltante(1)"),
             TABULAR_COLOR, height=11.5),
         Box("tab_mlp", "MLP", tab_x, 64, 40,
-            ("Linear(31→32) → ReLU → Dropout", "→ Linear(32→16)"),
+            ("Linear(30→32) → ReLU → Dropout", "→ Linear(32→16)"),
             TABULAR_COLOR, dashed=True, height=10.5),
 
         Box("fusion", "Fusión", mid_x, 8, 30, ("concat",), FUSION_COLOR, dashed=True),
@@ -243,7 +243,7 @@ def two_towers() -> Diagram:
         Edge("embedding", "encoder", "(B, L, d)"),
         Edge("encoder", "pooler", "(B, L, d)"),
         Edge("tab_in", "encoding", ""),
-        Edge("encoding", "tab_mlp", "x_tab (B, 31)"),
+        Edge("encoding", "tab_mlp", "x_tab (B, 30)"),
         Edge("pooler", "fusion", "h_text (B, 64)", elbow=True, entry_dx=-7.0),
         Edge("tab_mlp", "fusion", "h_tab (B, 16)", elbow=True, entry_dx=7.0),
         Edge("fusion", "head", "(B, 80)"),
@@ -259,6 +259,8 @@ def two_towers() -> Diagram:
         footnote=(
             "B = batch · L = longitud de la secuencia · d = d_model (64 en la "
             "configuración base)\n"
+            "x_tab = 12 category + 7 allergens + 10 price_position + 1 faltante = 30. "
+            "Las 4.455 filas sin alérgeno declarado son todo-ceros, no una columna.\n"
             "Borde punteado: el módulo tiene alternativas declaradas y medidas.\n"
             "tokenizador D1 · positional D10 · encoder D4 · pooler D8 · "
             "torre tabular D6 · fusión y MLP de salida D5"
