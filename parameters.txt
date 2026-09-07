@@ -35,11 +35,14 @@ tab_tower          = mlp
 tabular_dim        = 16
 fusion_head        = mlp
 
-# Protocolo de optimización.
+# Protocolo de optimización. El corte es por AP, que es la métrica que se reporta:
+# cortar por pérdida elegía una época ~7 antes del pico de AP y castigaba distinto a
+# cada configuración. El techo de épocas sube porque con AP el pico llega más tarde.
 learning_rate      = 1e-4
 weight_decay       = 0.01
-epochs             = 60
+epochs             = 150
 patience           = 10
+early_stopping     = ap
 batch_size         = 64
 seed               = 1337
 

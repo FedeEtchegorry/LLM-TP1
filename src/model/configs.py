@@ -36,6 +36,11 @@ MODELS = (LOGISTIC, TRANSFORMER, FROZEN, FINETUNE)
 
 PRETRAINED = (FROZEN, FINETUNE)
 
+STOP_ON_LOSS = "loss"
+STOP_ON_AP = "ap"
+EARLY_STOPPINGS = (STOP_ON_LOSS, STOP_ON_AP)
+"""Qué señal del split de parada elige la época que se conserva."""
+
 POSITIONAL_ENCODINGS = ("none", "learned", "sinusoidal")
 POOLINGS = ("cls", "mean", "attention")
 
@@ -54,6 +59,12 @@ transfer runs) and ``Q`` (diagnostic controls), so neither counts as an axis poi
 
 class ParameterError(ValueError):
     """A malformed parameters file, reported with the section that caused it."""
+
+
+def _drop_default_stopping(config_fields: dict) -> None:
+    """El criterio por defecto no entra al hash, para que lo grabado siga resolviendo."""
+    if config_fields.get("early_stopping") == STOP_ON_LOSS:
+        del config_fields["early_stopping"]
 
 
 @dataclass(frozen=True)
@@ -116,6 +127,7 @@ class RunConfig:
     weight_decay: float = 0.01
     epochs: int = 60
     patience: int = 10
+    early_stopping: str = STOP_ON_LOSS
     batch_size: int = 64
 
     seed: int = 1337
@@ -148,6 +160,7 @@ class RunConfig:
         for name in ("seeds", "checkpoints"):
             if config_fields[name] == 1:
                 del config_fields[name]
+        _drop_default_stopping(config_fields)
         training_fields = asdict(TRAINING)
         for name in self._DIGEST_TRAINING_FIELDS:
             training_fields[name] = config_fields.pop(name)
@@ -164,6 +177,7 @@ class RunConfig:
         del config_fields["name"]
         del config_fields["seeds"]
         del config_fields["checkpoints"]
+        _drop_default_stopping(config_fields)
         training_fields = asdict(TRAINING)
         for name in self._LEGACY_TRAINING_FIELDS:
             training_fields[name] = config_fields.pop(name)
@@ -289,6 +303,7 @@ def _run(name: str, section) -> RunConfig:
             weight_decay=section.getfloat("weight_decay", fallback=0.01),
             epochs=section.getint("epochs", fallback=60),
             patience=section.getint("patience", fallback=10),
+            early_stopping=section.get("early_stopping", fallback=STOP_ON_LOSS),
             batch_size=section.getint("batch_size", fallback=64),
             seed=section.getint("seed", fallback=1337),
             seeds=section.getint("seeds", fallback=1),
@@ -324,6 +339,11 @@ def _validate(config: RunConfig) -> None:
             raise ParameterError(f"[{name}] {label}={value} must be at least 1")
     if config.learning_rate <= 0:
         raise ParameterError(f"[{name}] learning_rate must be positive")
+    if config.early_stopping not in EARLY_STOPPINGS:
+        raise ParameterError(
+            f"[{name}] early_stopping={config.early_stopping!r} is not one of "
+            f"{EARLY_STOPPINGS}"
+        )
     if config.model != TRANSFORMER:
         return
     for value, allowed, label in (
