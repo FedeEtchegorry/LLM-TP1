@@ -215,6 +215,48 @@ def ranking_gains(
     return _save(figure, path)
 
 
+def topk_observed_btr(
+    table: pd.DataFrame,
+    *,
+    overall_rate: float,
+    title: str,
+    path: Path,
+    model_label: str = "Transformer (dos torres)",
+    annotate_fraction: float = 0.05,
+) -> Path:
+    figure, axes = plt.subplots(figsize=FIGSIZE)
+    percentages = table["fraction"] * 100
+    axes.plot(
+        percentages, table["precision"] * 100, "o-",
+        color=MODEL_COLOR, linewidth=2.2, markersize=7, zorder=3, label=model_label,
+    )
+    axes.axhline(
+        overall_rate * 100, color=NEUTRAL, linestyle="--", linewidth=1.4, zorder=2,
+        label=f"azar: promocionar al voleo ({overall_rate * 100:.2f}%)",
+    )
+
+    row = table.iloc[(table["fraction"] - annotate_fraction).abs().argsort().iloc[0]]
+    axes.annotate(
+        f"top-{row['fraction'] * 100:.0f}%: {row['precision'] * 100:.1f}% observado",
+        xy=(row["fraction"] * 100, row["precision"] * 100),
+        xytext=(12, 14),
+        textcoords="offset points",
+        fontsize=10,
+        fontweight="bold",
+        color=MODEL_COLOR,
+        arrowprops=dict(arrowstyle="->", color=MODEL_COLOR, linewidth=1.2),
+    )
+
+    axes.set_xscale("log")
+    axes.set_xlabel("k: % de productos promocionados")
+    axes.set_ylabel("BTR observado en el top-k (%)")
+    axes.set_title(title)
+    axes.grid(alpha=0.25, which="both")
+    axes.legend(loc="upper right", fontsize=9)
+    _framed(axes)
+    return _save(figure, path)
+
+
 def attention_by_group(table: pd.DataFrame, *, title: str, path: Path) -> Path:
     """Where ``[CLS]`` looks, by group of positions, in mass and per token.
 

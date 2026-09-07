@@ -447,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     from src.model.figures import errors_by_level as errors_figure
     from src.model.figures import ranking_gains as gains_figure
     from src.model.figures import roc_and_pr
+    from src.model.figures import topk_observed_btr as topk_btr_figure
 
     args = parse_args(argv)
     figures = Path(args.figures)
@@ -547,6 +548,20 @@ def main(argv: list[str] | None = None) -> int:
         path=figures / "09-final-ranking-lift.png",
     )
     print(f"\nfigure: {path}")
+
+    path = topk_btr_figure(
+        gains[0][1],
+        overall_rate=positive_rate,
+        title="BTR observado al promocionar el top-k del catalogo (test)",
+        path=figures / "09-final-btr-topk.png",
+        model_label=gains[0][0],
+    )
+    top5 = gains[0][1].iloc[(gains[0][1]["fraction"] - 0.05).abs().argsort().iloc[0]]
+    print(
+        f"\ntop-{top5['fraction'] * 100:.0f}%: BTR observado {top5['precision'] * 100:.1f}% "
+        f"contra {positive_rate * 100:.2f}% de base (azar)"
+    )
+    print(f"figure: {path}")
 
     print(f"\n=== WHERE IT FAILS, BY {ERROR_COLUMN} ===")
     errors = errors_by_level(frame, partitions.test_indices, scores[0], ERROR_COLUMN)
