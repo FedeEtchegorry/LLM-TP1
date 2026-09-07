@@ -1566,6 +1566,55 @@ def generalisation_ladder(levels, *, title: str, path: Path) -> Path:
     return _save(figure, path)
 
 
+def overfitting_curve(frame: pd.DataFrame, *, title: str, path: Path) -> Path:
+    """Cuándo empieza el sobreajuste, y dónde cortó el early stopping.
+
+    Izquierda las dos pérdidas: mientras van juntas el modelo generaliza, y donde la de
+    corte se despega mientras la de ajuste sigue bajando empieza el sobreajuste. Derecha
+    el AP sobre el mismo conjunto de corte, con dos marcas por fold: la época que se
+    conservó y la del mínimo de pérdida. Que no coincidan es el motivo por el que el
+    criterio de parada dejó de ser la pérdida.
+    """
+    figure, (left, right) = plt.subplots(1, 2, figsize=(13, 5.4))
+
+    for fold, rows in frame.groupby("fold_index"):
+        colour = PALETTE[int(fold) % len(PALETTE)]
+        rows = rows.sort_values("epoch")
+        kept = int(rows["best_epoch"].iloc[0])
+        cheapest = int(rows.loc[rows["stop_loss"].idxmin(), "epoch"])
+
+        left.plot(rows["epoch"], rows["fit_loss"], color=colour, linewidth=1.4,
+                  label=f"fold {fold}")
+        left.plot(rows["epoch"], rows["stop_loss"], color=colour, linewidth=1.4,
+                  linestyle="--")
+        left.axvspan(kept, rows["epoch"].max(), color=colour, alpha=0.05, zorder=1)
+        left.axvline(kept, color=colour, linewidth=1.0, linestyle=":", zorder=2)
+
+        right.plot(rows["epoch"], rows["stop_ap"], color=colour, linewidth=1.4)
+        marked = rows[rows["epoch"] == kept]
+        right.plot(marked["epoch"], marked["stop_ap"], "o", color=colour,
+                   markersize=8, zorder=4)
+        loss_best = rows[rows["epoch"] == cheapest]
+        right.plot(loss_best["epoch"], loss_best["stop_ap"], "o", markersize=8,
+                   markerfacecolor="none", markeredgecolor=NEUTRAL,
+                   markeredgewidth=1.6, zorder=3)
+
+    left.set_xlabel("Época")
+    left.set_ylabel("Pérdida")
+    left.set_title("— ajuste   ┄ corte   ▏sombra: épocas sin mejorar", fontsize=12)
+    left.grid(alpha=0.25)
+    left.legend(loc="upper right", fontsize=8, ncol=2)
+
+    right.set_xlabel("Época")
+    right.set_ylabel("AP sobre el conjunto de corte")
+    right.set_title("● época conservada   ○ mínimo de pérdida", fontsize=12)
+    right.grid(alpha=0.25)
+
+    figure.suptitle(title, y=0.99)
+    figure.tight_layout(rect=(0, 0, 1, 0.94))
+    return _save(figure, path)
+
+
 def gap_by_epoch(frame: pd.DataFrame, *, title: str, path: Path) -> Path:
     """When the memorisation gap opens, and where early stopping cut the run.
 

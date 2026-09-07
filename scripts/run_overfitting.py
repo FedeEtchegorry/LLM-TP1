@@ -29,7 +29,12 @@ from src.model.configs import (
 from src.model.console import utf8_console
 from src.model.eda_contract import require_valid
 from src.model.experiment import describe, partition, run_one, run_test
-from src.model.figures import FIGURES_DIR, gap_by_epoch, generalisation_ladder
+from src.model.figures import (
+    FIGURES_DIR,
+    gap_by_epoch,
+    generalisation_ladder,
+    overfitting_curve,
+)
 from src.model.overfitting import (
     epoch_gap_frame,
     fold_levels,
@@ -167,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
             epoch_gap_frame(record),
             title=f"Brecha por epoca — {config.name}",
             path=figures / "gap-by-epoch.png",
+        ),
+        overfitting_curve(
+            epoch_gap_frame(record),
+            title=f"Sobreajuste por epoca — {config.name}",
+            path=figures / "overfitting-curve.png",
         ),
     ]
 
