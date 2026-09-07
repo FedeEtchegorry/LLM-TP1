@@ -122,62 +122,155 @@ mediciones de dispersión nula se separan por 1e-16 y la comparación se vuelve 
 volado."""
 
 
-def distinguishable(delta: float, spreads: tuple[float, ...]) -> bool:
-    """Regla declarada, no un test: una diferencia cuenta si supera la suma de las
-    dispersiones entre semillas de las dos celdas que compara.
+@dataclass(frozen=True)
+class Contrast:
+    """Una comparación entre dos celdas, resuelta semilla contra semilla.
 
-    Es deliberadamente conservadora y deliberadamente simple. Los cinco folds comparten
-    filas de entrenamiento, así que su dispersión no es un intervalo de confianza y
-    fabricar un p-valor acá sería darle a un número descriptivo una autoridad que no
-    tiene. Lo que se reporta es la regla y el resultado de aplicarla.
+    Las celdas comparten folds y semillas, así que la dificultad de un fold y la suerte
+    de una inicialización entran igual en los dos brazos y se cancelan al restar. Lo que
+    queda es el efecto. Restar las medias primero tira esa estructura: da el mismo
+    número y una incertidumbre mucho más grande.
     """
-    return abs(delta) > sum(spreads) + FLOAT_TOLERANCE
+
+    label: str
+    differences: tuple[float, ...]
+
+    @property
+    def mean(self) -> float:
+        return float(np.mean(self.differences))
+
+    @property
+    def error(self) -> float:
+        """Cuánto se mueve la media entre semillas, no cuánto se mueve una semilla."""
+        if len(self.differences) < 2:
+            return float("inf")
+        return float(np.std(self.differences, ddof=1) / np.sqrt(len(self.differences)))
+
+    @property
+    def agree(self) -> int:
+        return sum(1 for value in self.differences if value > 0)
+
+    @property
+    def consistent(self) -> bool:
+        return self.agree in (0, len(self.differences))
+
+    @property
+    def distinguishable(self) -> bool:
+        """Regla declarada, no un test: el signo no se da vuelta entre semillas, y la
+        media supera lo que la propia media se mueve entre ellas.
+
+        Sigue sin ser inferencia: tres semillas no dan un intervalo de confianza y los
+        cinco folds comparten filas de entrenamiento. Lo que se reporta es la regla, el
+        resultado de aplicarla, y cuántas semillas coinciden en el signo.
+        """
+        return self.consistent and abs(self.mean) > self.error + FLOAT_TOLERANCE
+
+    def __str__(self) -> str:
+        verdict = "distinguible" if self.distinguishable else "dentro del ruido"
+        return (
+            f"{self.label:<48s} = {self.mean:+.4f} ± {self.error:.4f}  "
+            f"{self.agree}/{len(self.differences)} semillas  {verdict}"
+        )
+
+
+def contrast(label: str, left: Measured, right: Measured) -> Contrast:
+    """Una diferencia por semilla, promediando los folds que las dos celdas comparten."""
+    return Contrast(
+        label,
+        tuple(
+            float(np.mean(a)) - float(np.mean(b))
+            for a, b in zip(left.runs, right.runs)
+        ),
+    )
 
 
 def _by_key(measured: list[Measured]) -> dict[str, Measured]:
     return {item.cell.key: item for item in measured}
 
 
-def read_d1(measured: list[Measured]) -> str:
-    """La conclusión de D1, escrita en cualquiera de los sentidos en que salga.
+def _interaction(label: str, first: Contrast, second: Contrast) -> Contrast:
+    """La diferencia entre dos diferencias, todavía pareada por semilla."""
+    return Contrast(
+        label,
+        tuple(a - b for a, b in zip(first.differences, second.differences)),
+    )
 
-    Los cuatro contrastes del 2x2 se reportan siempre; la conclusión la deciden los dos
-    de la fila ``wordpiece`` y la columna sin puntuación, que son los limpios.
-    """
+
+def d1_contrasts(measured: list[Measured]) -> tuple[Contrast, ...]:
+    """Los cuatro contrastes del 2x2, en el orden en que se leen y se dibujan."""
+    found = _by_key(measured)
+    a, f, b, c = found["A"], found["F"], found["B"], found["C"]
+    return (
+        contrast("WordPiece: sin paréntesis → con paréntesis", b, c),
+        contrast("palabras enteras: sin puntuación → con puntuación", f, a),
+        contrast("sin puntuación: palabras enteras → WordPiece", c, a),
+        contrast("con puntuación: palabras enteras → WordPiece", b, f),
+    )
+
+
+def d10_contrasts(measured: list[Measured]) -> tuple[Contrast, Contrast, Contrast]:
+    """Los dos efectos de los paréntesis y la interacción entre ellos."""
+    found = _by_key(measured)
+    b, c, d, e = found["B"], found["C"], found["D"], found["E"]
+    with_positions = contrast("con posiciones: sin → con paréntesis", b, c)
+    without_positions = contrast("sin posiciones: sin → con paréntesis", d, e)
+    return (
+        with_positions,
+        without_positions,
+        _interaction(
+            "cuánto cambia ese efecto al quitar las posiciones",
+            with_positions,
+            without_positions,
+        ),
+    )
+
+
+def interaction_series(measured: list[Measured]):
+    """El 2x2 como dos líneas: un punto por nivel de paréntesis, y el delta pareado."""
+    found = _by_key(measured)
+    with_positions, without_positions, _ = d10_contrasts(measured)
+    return [
+        (
+            "positional = learned",
+            [(found["C"].mean, found["C"].spread), (found["B"].mean, found["B"].spread)],
+            (with_positions.mean, with_positions.error),
+        ),
+        (
+            "positional = none",
+            [(found["E"].mean, found["E"].spread), (found["D"].mean, found["D"].spread)],
+            (without_positions.mean, without_positions.error),
+        ),
+    ]
+
+
+def plotted(contrasts) -> list[tuple[str, float, float, bool]]:
+    """Lo que la figura necesita de un contraste, sin que dibujar importe el módulo."""
+    return [
+        (item.label.strip(), item.mean, item.error, item.distinguishable)
+        for item in contrasts
+    ]
+
+
+def read_d1(measured: list[Measured]) -> str:
+    """La conclusión de D1, escrita en cualquiera de los sentidos en que salga."""
     found = _by_key(measured)
     missing = {"A", "F", "B", "C"} - set(found)
     if missing:
         return f"D1 incompleto: faltan las celdas {sorted(missing)}"
 
-    a, f, b, c = found["A"], found["F"], found["B"], found["C"]
-    brackets = b.mean - c.mean
-    punctuation = f.mean - a.mean
-    tokenizer = c.mean - a.mean
-    tokenizer_marked = b.mean - f.mean
-    brackets_real = distinguishable(brackets, (b.spread, c.spread))
-    punctuation_real = distinguishable(punctuation, (f.spread, a.spread))
-    tokenizer_real = distinguishable(tokenizer, (c.spread, a.spread))
-
-    lines = [
-        f"paréntesis en wordpiece  (B − C) = {brackets:+.4f}  "
-        f"{'distinguible' if brackets_real else 'dentro del ruido'}",
-        f"puntuación en whole-word (F − A) = {punctuation:+.4f}  "
-        f"{'distinguible' if punctuation_real else 'dentro del ruido'}",
-        f"tokenizador sin puntuación (C − A) = {tokenizer:+.4f}  "
-        f"{'distinguible' if tokenizer_real else 'dentro del ruido'}",
-        f"tokenizador con puntuación (B − F) = {tokenizer_marked:+.4f}",
-    ]
-    if brackets_real and not tokenizer_real:
+    brackets, punctuation, tokenizer, marked = d1_contrasts(measured)
+    lines = [str(item) for item in (brackets, punctuation, tokenizer, marked)]
+    if brackets.distinguishable and not tokenizer.distinguishable:
         lines.append(
             "La mejora viene de conservar los paréntesis, no de WordPiece en general: "
             "el control queda al nivel del regex de v1."
         )
-    elif brackets_real and tokenizer_real:
+    elif brackets.distinguishable and tokenizer.distinguishable:
         lines.append(
             "Las dos cosas aportan. El delimitador pesa más que el cambio de "
             "tokenizador, pero WordPiece suma por su cuenta."
         )
-    elif tokenizer_real and not brackets_real:
+    elif tokenizer.distinguishable and not brackets.distinguishable:
         lines.append(
             "Lo que mueve el AP es el tokenizador y no los paréntesis. La historia del "
             "delimitador que íbamos a contar no se sostiene."
@@ -189,7 +282,7 @@ def read_d1(measured: list[Measured]) -> str:
             "cambio de tokenización no cambia lo que el modelo puede aprender."
         )
     lines.append(
-        "La fila whole-word (F − A) mide toda la puntuación, no sólo los paréntesis, "
+        "La fila de palabras enteras mide toda la puntuación, no sólo los paréntesis, "
         "porque su celda sin puntuación tiene que reproducir v1 exactamente. Es la "
         "línea base histórica, no el factor limpio."
     )
@@ -203,25 +296,16 @@ def read_d10(measured: list[Measured]) -> str:
     if missing:
         return f"D10 incompleto: faltan las celdas {sorted(missing)}"
 
-    b, c, d, e = found["B"], found["C"], found["D"], found["E"]
-    with_positions = b.mean - c.mean
-    without_positions = d.mean - e.mean
-    interaction = with_positions - without_positions
+    with_positions, without_positions, interaction = d10_contrasts(measured)
+    lines = [str(item) for item in (with_positions, without_positions, interaction)]
+    anchored = not without_positions.distinguishable or without_positions.mean < 0
 
-    lines = [
-        f"paréntesis con positional=learned = {with_positions:+.4f}",
-        f"paréntesis con positional=none    = {without_positions:+.4f}",
-        f"interacción                       = {interaction:+.4f}",
-    ]
-    real = distinguishable(interaction, (b.spread, c.spread, d.spread, e.spread))
-    anchored = not distinguishable(without_positions, (d.spread, e.spread))
-
-    if real and anchored:
+    if interaction.distinguishable and anchored:
         lines.append(
             "La interacción apareció. Los paréntesis ganan sólo cuando hay posiciones "
             "que permitan anclarlos: el mecanismo es posicional, como predijimos."
         )
-    elif not real and not anchored:
+    elif not interaction.distinguishable and without_positions.mean > 0:
         lines.append(
             "Los paréntesis ganan también sin positional encoding, así que el mecanismo "
             "NO es el anclaje posicional y la historia de D1 es falsa. Se reporta."
@@ -232,23 +316,13 @@ def read_d10(measured: list[Measured]) -> str:
             "principales. No alcanza para afirmar el mecanismo en ninguno de los dos "
             "sentidos."
         )
-    lines.append(
-        "Honestidad a declarar: con positional=none, «con paréntesis» no es idéntico a "
-        "«sin paréntesis» — la bolsa tiene dos tokens más. Debería ser despreciable, "
-        "pero si aparece algo mínimo en esa celda, es eso y no una señal."
-    )
+    if without_positions.distinguishable and without_positions.mean < 0:
+        lines.append(
+            "Sin posiciones los paréntesis no son neutros sino levemente dañinos: son "
+            "dos tokens más en la bolsa y ninguna forma de usarlos. Es más de lo que "
+            "esperábamos y se dice."
+        )
     return "\n".join(lines)
-
-
-def interaction_table(measured: list[Measured]) -> np.ndarray:
-    """El 2×2 de D10 como matriz ``[positional][keep_brackets]``, para la diapositiva."""
-    found = _by_key(measured)
-    return np.array(
-        [
-            [found["C"].mean, found["B"].mean],
-            [found["E"].mean, found["D"].mean],
-        ]
-    )
 
 
 def markdown_table(measured: list[Measured]) -> str:

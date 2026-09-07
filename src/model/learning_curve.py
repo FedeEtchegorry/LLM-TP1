@@ -42,7 +42,7 @@ from statistics import fmean, stdev
 
 import numpy as np
 
-from src.model.ablation import distinguishable
+from src.model.ablation import Contrast
 from src.model.representation_selection import SEEDS, seed_mean, seed_spread
 from src.partitions import DataPartitions, FoldIndices
 
@@ -132,14 +132,16 @@ def read_slopes(points: list[Point]) -> str:
 
     t_mean, t_spread = fmean(transformer), _spread(transformer)
     l_mean, l_spread = fmean(logistic), _spread(logistic)
-    difference = t_mean - l_mean
-    steeper = distinguishable(difference, (t_spread, l_spread))
+    gap = Contrast(
+        "diferencia           ",
+        tuple(t - l for t, l in zip(transformer, logistic)),
+    )
+    steeper, difference = gap.distinguishable, gap.mean
 
     lines = [
         f"pendiente Transformer = {t_mean:+.4f} ± {t_spread:.4f} AP por década de filas",
         f"pendiente baseline    = {l_mean:+.4f} ± {l_spread:.4f}",
-        f"diferencia            = {difference:+.4f}  "
-        f"{'distinguible' if steeper else 'dentro del ruido'}",
+        str(gap),
     ]
     if steeper and difference > 0:
         lines.append(
