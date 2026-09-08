@@ -47,7 +47,7 @@ from src.model.learning_curve import (
 from src.model.representation_selection import SEEDS
 from src.model.results import RESULTS_DIR, load
 
-MODELS = (TRANSFORMER, LOGISTIC)
+MODELS = (TRANSFORMER,)
 LABELS = {TRANSFORMER: "Transformer (dos torres)", LOGISTIC: "Baseline lineal"}
 
 

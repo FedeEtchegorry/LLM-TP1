@@ -18,6 +18,7 @@ lib/
 lib64/
 parts/
 results/*
+tests/*
 sdist/
 clases/
 var/
