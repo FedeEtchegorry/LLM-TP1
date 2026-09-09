@@ -61,6 +61,7 @@ WHOLE_WORD = "whole-word"
 WORDPIECE = "wordpiece"
 LEARNED = "learned"
 NONE = "none"
+SINUSOIDAL = "sinusoidal"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,12 @@ GRID = (
     Cell("C", "WordPiece sin paréntesis (control)", WORDPIECE, False, LEARNED, (TOKENIZER, INTERACTION)),
     Cell("D", "WordPiece con paréntesis · positional=none", WORDPIECE, True, NONE, (INTERACTION,)),
     Cell("E", "WordPiece sin paréntesis · positional=none", WORDPIECE, False, NONE, (INTERACTION,)),
+    # G y H extienden la interaccion a positional=sinusoidal: si el efecto de los
+    # parentesis depende de "tener posiciones" en general o puntualmente de que sean
+    # aprendidas. G ya estaba grabada (es la celda que usa el barrido general); H es
+    # nueva.
+    Cell("G", "WordPiece con paréntesis · positional=sinusoidal", WORDPIECE, True, SINUSOIDAL, (INTERACTION,)),
+    Cell("H", "WordPiece sin paréntesis · positional=sinusoidal", WORDPIECE, False, SINUSOIDAL, (INTERACTION,)),
 )
 
 BY_KEY = {cell.key: cell for cell in GRID}

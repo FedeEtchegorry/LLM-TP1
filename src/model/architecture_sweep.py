@@ -1,9 +1,10 @@
 """Barrido de arquitectura: un factor por vez, con el resto congelado en la base.
 
-Dos familias de ejes. Los de **capacidad** cambian cuánto mide el encoder --heads, bloques
+Tres familias de ejes. Los de **capacidad** cambian cuánto mide el encoder --heads, bloques
 apilados, ``d_model``, dimensión del FFN y dropout--. Los de **módulo** cambian qué se usa
 en cada lugar: pooler, positional encoding, la capa de cierre del embedding, la torre
-tabular y el MLP de salida.
+tabular y el MLP de salida. Los de **protocolo** cambian cómo se optimiza en lugar de qué
+se optimiza --por ahora, sólo el learning rate--.
 
 **El valor base aparece en todos los ejes y se mide una sola vez**: es la misma
 configuración y el caché por digest la reconoce. Sin ese colapso el barrido costaría 28
@@ -69,7 +70,12 @@ Van en el mismo barrido que los de capacidad porque son la misma pregunta con la
 forma --un factor por vez contra la base, pareado por semilla-- y porque así comparten el
 valor base, que se mide una sola vez para los diez ejes."""
 
-AXES = CAPACITY_AXES + MODULE_AXES
+PROTOCOL_AXES = (
+    Axis("lr", "learning_rate", "Learning rate", (3e-5, 1e-4, 3e-4, 1e-3)),
+)
+"""Cómo se optimiza, no qué se optimiza. Un solo eje por ahora."""
+
+AXES = CAPACITY_AXES + MODULE_AXES + PROTOCOL_AXES
 
 BY_KEY = {axis.key: axis for axis in AXES}
 
