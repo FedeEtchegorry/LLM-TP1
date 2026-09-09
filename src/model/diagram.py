@@ -231,7 +231,7 @@ def two_towers() -> Diagram:
             ("Linear(80→32) → ReLU → Dropout", "→ Linear(32→1)"),
             FUSION_COLOR, dashed=True, height=10.5),
         Box("output", "sigmoid → p(bought) = BTR", mid_x, -24, 42,
-            ("BCEWithLogitsLoss · PR-AUC primaria",), OUTPUT_COLOR),
+            ("BCEWithLogitsLoss",), OUTPUT_COLOR),
     )
     edges = (
         Edge("text_in", "tokenizer", "texto crudo"),
