@@ -219,8 +219,8 @@ def two_towers() -> Diagram:
         Box("tab_in", "category · allergens · price_position", tab_x, 95, 40,
             ("categóricas + numérica",), TABULAR_COLOR),
         Box("encoding", "Codificación tabular", tab_x, 80, 40,
-            ("one-hot(12) · one-hot(7)",
-             "piecewise-linear(10) + faltante(1)"),
+            ("one-hot(12) · one-hot(8)",
+             "piecewise-linear(10)"),
             TABULAR_COLOR, height=11.5),
         Box("tab_mlp", "MLP", tab_x, 64, 40,
             ("Linear(30→32) → ReLU → Dropout", "→ Linear(32→16)"),
@@ -255,8 +255,9 @@ def two_towers() -> Diagram:
         footnote=(
             "B = batch · L = longitud de la secuencia · d = d_model (64 en la "
             "configuración base)\n"
-            "x_tab = 12 category + 7 allergens + 10 price_position + 1 faltante = 30. "
-            "Las 4.455 filas sin alérgeno declarado son todo-ceros, no una columna.\n"
+            "x_tab = 12 category + 8 allergens + 10 price_position = 30. "
+            "Las 4.455 filas sin alérgeno declarado entran por «(no declara)», que es "
+            "el primer nivel del one-hot y no una fila de ceros.\n"
             "Borde punteado: el módulo tiene alternativas declaradas y medidas "
             "(tokenizador, positional, encoder, pooler, torre tabular y MLP de salida)."
         ),
